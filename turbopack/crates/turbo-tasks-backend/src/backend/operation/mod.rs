@@ -18,7 +18,7 @@ use tracing::info_span;
 #[cfg(feature = "trace_prepare_tasks")]
 use tracing::trace_span;
 use turbo_tasks::{
-    CellId, DynTaskInputs, FxIndexMap, RawVc, TaskExecutionReason, TaskId, TaskPriority,
+    CellId, DynTaskInputs, FxIndexMap, RawVc, TaskExecutionOrder, TaskExecutionReason, TaskId,
     TurboTasksBackendApi, TurboTasksCallApi, TypedSharedReference, backend::CachedTaskType,
     macro_helpers::NativeFunction,
 };
@@ -88,9 +88,9 @@ pub trait ExecuteContext<'e>: Sized {
         task_id2: TaskId,
         category: TaskDataCategory,
     ) -> (Self::TaskGuardImpl, Self::TaskGuardImpl);
-    fn schedule(&mut self, task_id: TaskId, parent_priority: TaskPriority);
-    fn schedule_task(&self, task: Self::TaskGuardImpl, parent_priority: TaskPriority);
-    fn get_current_task_priority(&self) -> TaskPriority;
+    fn schedule(&mut self, task_id: TaskId, parent_execution_order: TaskExecutionOrder);
+    fn schedule_task(&self, task: Self::TaskGuardImpl, parent_execution_order: TaskExecutionOrder);
+    fn get_current_task_execution_order(&self) -> TaskExecutionOrder;
     fn operation_suspend_point<T>(&mut self, op: &T)
     where
         T: Clone + Into<AnyOperation>;
@@ -935,28 +935,28 @@ impl<'e, B: BackingStorage> ExecuteContext<'e> for ExecuteContextImpl<'e, B> {
         )
     }
 
-    fn schedule(&mut self, task_id: TaskId, parent_priority: TaskPriority) {
+    fn schedule(&mut self, task_id: TaskId, parent_execution_order: TaskExecutionOrder) {
         let task = self.task(task_id, TaskDataCategory::All);
-        self.schedule_task(task, parent_priority);
+        self.schedule_task(task, parent_execution_order);
     }
 
-    fn schedule_task(&self, task: Self::TaskGuardImpl, parent_priority: TaskPriority) {
+    fn schedule_task(&self, task: Self::TaskGuardImpl, parent_execution_order: TaskExecutionOrder) {
         let priority = if task.has_output() {
-            TaskPriority::invalidation(
+            TaskExecutionOrder::invalidation(
                 task.get_leaf_distance()
                     .copied()
                     .unwrap_or_default()
                     .distance,
             )
         } else {
-            TaskPriority::initial()
+            TaskExecutionOrder::initial()
         };
         self.turbo_tasks
-            .schedule(task.id(), priority.in_parent(parent_priority));
+            .schedule(task.id(), priority.in_parent(parent_execution_order));
     }
 
-    fn get_current_task_priority(&self) -> TaskPriority {
-        self.turbo_tasks.get_current_task_priority()
+    fn get_current_task_execution_order(&self) -> TaskExecutionOrder {
+        self.turbo_tasks.get_current_task_execution_order()
     }
 
     fn operation_suspend_point<T: Clone + Into<AnyOperation>>(&mut self, op: &T) {
@@ -1119,12 +1119,12 @@ pub trait TaskGuard: Debug + TaskStorageAccessors {
     /// It returns a set of tasks and which info is needed.
     fn prefetch(&mut self) -> Option<FxIndexMap<TaskId, TaskDataCategory>>;
 
-    fn is_dirty(&self) -> Option<TaskPriority> {
+    fn is_dirty(&self) -> Option<TaskExecutionOrder> {
         self.get_dirty().and_then(|dirtyness| match dirtyness {
             Dirtyness::Dirty(priority) => Some(*priority),
             Dirtyness::SessionDependent => {
                 if !self.current_session_clean() {
-                    Some(TaskPriority::leaf())
+                    Some(TaskExecutionOrder::leaf())
                 } else {
                     None
                 }

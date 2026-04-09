@@ -22,7 +22,9 @@ use tracing::span::Span;
     feature = "trace_find_and_schedule"
 ))]
 use tracing::trace_span;
-use turbo_tasks::{FxIndexMap, TaskExecutionReason, TaskId, TaskPriority, event::EventDescription};
+use turbo_tasks::{
+    FxIndexMap, TaskExecutionOrder, TaskExecutionReason, TaskId, event::EventDescription,
+};
 
 #[cfg(feature = "trace_task_dirty")]
 use crate::backend::operation::invalidate::TaskDirtyCause;
@@ -857,7 +859,7 @@ pub struct AggregationUpdateQueue {
     #[bincode(with = "turbo_bincode::ringset")]
     optimize_queue: FxRingSet<OptimizeJob>,
     #[bincode(skip, default = "FxHashMap::default")]
-    scheduled_tasks: FxHashMap<TaskId, TaskPriority>,
+    scheduled_tasks: FxHashMap<TaskId, TaskExecutionOrder>,
 }
 
 impl AggregationUpdateQueue {
@@ -1470,7 +1472,7 @@ impl AggregationUpdateQueue {
         } else if !task.has_output() {
             Some((
                 TaskExecutionReason::ActivateInitial,
-                ctx.get_current_task_priority(),
+                ctx.get_current_task_execution_order(),
             ))
         } else {
             None

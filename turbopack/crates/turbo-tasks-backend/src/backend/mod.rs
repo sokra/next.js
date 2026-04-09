@@ -29,8 +29,8 @@ use turbo_bincode::{TurboBincodeBuffer, new_turbo_bincode_decoder, new_turbo_bin
 use turbo_tasks::{
     CellId, FxDashMap, RawVc, ReadCellOptions, ReadCellTracking, ReadConsistency,
     ReadOutputOptions, ReadTracking, SharedReference, StackDynTaskInputs, TRANSIENT_TASK_BIT,
-    TaskExecutionReason, TaskId, TaskPersistence, TaskPriority, TraitTypeId, TurboTasksBackendApi,
-    TurboTasksPanic, ValueTypeId,
+    TaskExecutionOrder, TaskExecutionReason, TaskId, TaskPersistence, TraitTypeId,
+    TurboTasksBackendApi, TurboTasksPanic, ValueTypeId,
     backend::{
         Backend, CachedTaskType, CellContent, CellHash, TaskExecutionSpec, TransientTaskType,
         TurboTaskContextError, TurboTaskLocalContextError, TurboTasksError,
@@ -810,7 +810,7 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
         // done: true } it must have Output and would early return.
         let old = task.set_in_progress(in_progress_state);
         debug_assert!(old.is_none(), "InProgress already exists");
-        ctx.schedule_task(task, TaskPriority::Initial);
+        ctx.schedule_task(task, TaskExecutionOrder::Initial);
 
         Ok(Err(listener))
     }
@@ -949,7 +949,7 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
             TaskExecutionReason::CellNotAvailable,
             EventDescription::new(|| task.get_task_desc_fn()),
         );
-        ctx.schedule_task(task, TaskPriority::Initial);
+        ctx.schedule_task(task, TaskExecutionOrder::Initial);
 
         Ok(Err(listener))
     }
@@ -1874,7 +1874,7 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
     fn try_start_task_execution(
         &self,
         task_id: TaskId,
-        priority: TaskPriority,
+        execution_order: TaskExecutionOrder,
         turbo_tasks: &dyn TurboTasksBackendApi<TurboTasksBackend<B>>,
     ) -> Option<TaskExecutionSpec<'_>> {
         let execution_reason;
@@ -1955,7 +1955,7 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
                     arg,
                 } = &*task_type;
                 (
-                    native_fn.span(task_id.persistence(), execution_reason, priority),
+                    native_fn.span(task_id.persistence(), execution_reason, execution_order),
                     native_fn.execute(*this, &**arg),
                 )
             }
@@ -3489,11 +3489,11 @@ impl<B: BackingStorage> Backend for TurboTasksBackend<B> {
     fn try_start_task_execution(
         &self,
         task_id: TaskId,
-        priority: TaskPriority,
+        execution_order: TaskExecutionOrder,
         turbo_tasks: &dyn TurboTasksBackendApi<Self>,
     ) -> Option<TaskExecutionSpec<'_>> {
         self.0
-            .try_start_task_execution(task_id, priority, turbo_tasks)
+            .try_start_task_execution(task_id, execution_order, turbo_tasks)
     }
 
     fn task_execution_completed(
