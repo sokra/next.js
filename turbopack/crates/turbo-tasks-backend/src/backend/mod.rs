@@ -810,7 +810,7 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
         // done: true } it must have Output and would early return.
         let old = task.set_in_progress(in_progress_state);
         debug_assert!(old.is_none(), "InProgress already exists");
-        ctx.schedule_task(task, TaskExecutionOrder::Initial);
+        ctx.schedule_task(task, TaskExecutionOrder::Recomputation);
 
         Ok(Err(listener))
     }
@@ -949,7 +949,7 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
             TaskExecutionReason::CellNotAvailable,
             EventDescription::new(|| task.get_task_desc_fn()),
         );
-        ctx.schedule_task(task, TaskExecutionOrder::Initial);
+        ctx.schedule_task(task, TaskExecutionOrder::Recomputation);
 
         Ok(Err(listener))
     }

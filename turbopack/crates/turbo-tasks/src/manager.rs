@@ -411,6 +411,7 @@ impl Display for ReadTracking {
 /// The aimed execution order of scheduled tasks. Tasks with lower values will be executed first.
 #[derive(Encode, Decode, Default, Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum TaskExecutionOrder {
+    Recomputation,
     Invalidation {
         phase: u32,
         leaf_distance: u32,
@@ -444,36 +445,45 @@ impl TaskExecutionOrder {
             // execution order so they run in-sequence with the invalidation wave that
             // triggered them.
             TaskExecutionOrder::Initial => parent_task_execution_order,
+            TaskExecutionOrder::Recomputation => TaskExecutionOrder::Recomputation,
             TaskExecutionOrder::Invalidation {
                 phase,
                 leaf_distance,
             } => {
-                if let TaskExecutionOrder::Invalidation {
-                    phase: parent_phase,
-                    leaf_distance: parent_leaf_distance,
-                } = parent_task_execution_order
-                {
-                    // We want to keep leaf distance, but adjust the phase so that the whole task
-                    // execution order is after the parent task
-                    let phase = parent_phase.max(*phase);
-                    let phase = if parent_leaf_distance > *leaf_distance {
-                        // The parent has a higher leaf_distance (closer to the root), so this child
-                        // task must run after it. Bump the phase to ensure this. The phase bump is
-                        // intentionally conservative: it delays this task after *all* tasks in the
-                        // current phase, not just after this specific parent. This avoids
-                        // worst-case double-recomputation at the cost of
-                        // being slightly more conservative than
-                        // strictly necessary.
-                        phase.saturating_add(1)
-                    } else {
-                        phase
-                    };
-                    Self::Invalidation {
-                        phase,
-                        leaf_distance: *leaf_distance,
+                match parent_task_execution_order {
+                    TaskExecutionOrder::Recomputation => TaskExecutionOrder::Recomputation,
+                    TaskExecutionOrder::Invalidation {
+                        phase: parent_phase,
+                        leaf_distance: parent_leaf_distance,
+                    } => {
+                        // We want to keep leaf distance, but adjust the phase so that the whole
+                        // task execution order is after the parent task
+                        let phase = parent_phase.max(*phase);
+                        let phase = if parent_leaf_distance > *leaf_distance {
+                            // The parent has a higher leaf_distance (closer to the root), so this
+                            // child task must run after it. Bump the
+                            // phase to ensure this. The phase bump is
+                            // intentionally conservative: it delays this task after *all* tasks in
+                            // the current phase, not just after this
+                            // specific parent. This avoids worst-case
+                            // double-recomputation at the cost of being
+                            // slightly more conservative than
+                            // strictly necessary.
+                            phase.saturating_add(1)
+                        } else {
+                            phase
+                        };
+                        Self::Invalidation {
+                            phase,
+                            leaf_distance: *leaf_distance,
+                        }
                     }
-                } else {
-                    *self
+                    _ => {
+                        // The parent is Initial (not yet part of any invalidation wave), so
+                        // there is no ordering context to inherit. Keep this task's own
+                        // execution order unchanged.
+                        *self
+                    }
                 }
             }
         }
@@ -483,7 +493,7 @@ impl TaskExecutionOrder {
 impl Display for TaskExecutionOrder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TaskExecutionOrder::Initial => write!(f, "initial"),
+            TaskExecutionOrder::Recomputation => write!(f, "recomputation"),
             TaskExecutionOrder::Invalidation {
                 phase,
                 leaf_distance,
@@ -494,6 +504,7 @@ impl Display for TaskExecutionOrder {
                     phase, leaf_distance
                 )
             }
+            TaskExecutionOrder::Initial => write!(f, "initial"),
         }
     }
 }

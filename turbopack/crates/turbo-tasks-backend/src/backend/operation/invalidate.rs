@@ -1,6 +1,6 @@
 use bincode::{Decode, Encode};
 use smallvec::SmallVec;
-use turbo_tasks::{TaskExecutionReason, TaskId, event::EventDescription};
+use turbo_tasks::{TaskExecutionOrder, TaskExecutionReason, TaskId, event::EventDescription};
 
 use crate::{
     backend::{
@@ -240,8 +240,18 @@ pub fn make_task_dirty_internal(
         *stale = true;
     }
     let current = task.get_dirty();
+    let execution_order = ctx.get_current_task_execution_order();
+    let execution_order = if matches!(execution_order, TaskExecutionOrder::Recomputation) {
+        // When an invalidation was triggered during recomputation (or an initial execution that was
+        // triggered from recomputation), we do not want to treat that as recomputation.
+        // That would make recomputation to be very viral, and breaks ordering. So we reset
+        // execution order to initial.
+        turbo_tasks::TaskExecutionOrder::Initial
+    } else {
+        execution_order
+    };
     let (old_self_dirty, old_current_session_self_clean, execution_order) = match current {
-        Some(Dirtyness::Dirty(current_priority)) => {
+        Some(Dirtyness::Dirty(current_execution_order)) => {
             #[cfg(feature = "trace_task_dirty")]
             let _span = tracing::trace_span!(
                 "task already dirty",
@@ -251,8 +261,9 @@ pub fn make_task_dirty_internal(
             )
             .entered();
             // already dirty
-            let execution_order = ctx.get_current_task_execution_order();
-            if *current_priority < execution_order {
+            if matches!(*current_execution_order, TaskExecutionOrder::Initial)
+                || *current_execution_order < execution_order
+            {
                 // The new execution order is later (higher value = runs after). Delay the task so
                 // it runs after the current invalidation context, avoiding premature
                 // re-execution before its dependencies are settled.
@@ -261,7 +272,6 @@ pub fn make_task_dirty_internal(
             return;
         }
         Some(Dirtyness::SessionDependent) => {
-            let execution_order = ctx.get_current_task_execution_order();
             task.set_dirty(Dirtyness::Dirty(execution_order));
             // It was a session-dependent dirty before, so we need to remove that clean count
             let was_current_session_clean = task.current_session_clean();
@@ -283,7 +293,6 @@ pub fn make_task_dirty_internal(
             }
         }
         None => {
-            let execution_order = ctx.get_current_task_execution_order();
             task.set_dirty(Dirtyness::Dirty(execution_order));
             // It was clean before, so we need to increase the dirty count
             (false, false, execution_order)

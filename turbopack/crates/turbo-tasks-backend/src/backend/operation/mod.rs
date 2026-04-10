@@ -941,7 +941,7 @@ impl<'e, B: BackingStorage> ExecuteContext<'e> for ExecuteContextImpl<'e, B> {
     }
 
     fn schedule_task(&self, task: Self::TaskGuardImpl, parent_execution_order: TaskExecutionOrder) {
-        let priority = if task.has_output() {
+        let execution_order = if task.has_output() {
             TaskExecutionOrder::invalidation(
                 task.get_leaf_distance()
                     .copied()
@@ -952,7 +952,7 @@ impl<'e, B: BackingStorage> ExecuteContext<'e> for ExecuteContextImpl<'e, B> {
             TaskExecutionOrder::initial()
         };
         self.turbo_tasks
-            .schedule(task.id(), priority.in_parent(parent_execution_order));
+            .schedule(task.id(), execution_order.in_parent(parent_execution_order));
     }
 
     fn get_current_task_execution_order(&self) -> TaskExecutionOrder {
