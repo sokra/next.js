@@ -566,7 +566,7 @@ pub trait Backend: Sync + Send {
         #[cfg(feature = "verify_determinism")] stateful: bool,
         has_invalidator: bool,
         turbo_tasks: &dyn TurboTasksBackendApi<Self>,
-    ) -> bool;
+    ) -> Option<TaskExecutionOrder>;
 
     type BackendJob: Send + 'static;
 
