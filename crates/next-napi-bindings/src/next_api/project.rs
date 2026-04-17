@@ -1576,7 +1576,7 @@ pub async fn all_entrypoints_write_to_disk_operation(
     Ok(project.entrypoints())
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 async fn output_assets_for_single_emit_operation(
     container: ResolvedVc<ProjectContainer>,
     app_dir_only: bool,
@@ -1607,7 +1607,7 @@ async fn output_assets_for_single_emit_operation(
     Ok(Vc::cell(merged_output_assets.into_iter().collect()))
 }
 
-#[turbo_tasks::function(operation)]
+#[turbo_tasks::function(operation, root)]
 async fn emit_all_output_assets_once_operation(
     container: ResolvedVc<ProjectContainer>,
     app_dir_only: bool,
