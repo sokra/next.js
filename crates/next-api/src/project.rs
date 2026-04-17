@@ -2247,7 +2247,7 @@ impl Project {
                 Ok(())
             } else {
                 emit_assets(
-                    all_output_assets.connect(),
+                    all_output_assets,
                     node_root.clone(),
                     client_relative_path.clone(),
                     node_root.clone(),

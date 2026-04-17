@@ -5,39 +5,15 @@ use smallvec::{SmallVec, smallvec};
 use tracing::Instrument;
 use turbo_rcstr::RcStr;
 use turbo_tasks::{
-    FxIndexMap, ResolvedVc, TryFlatJoinIterExt, TryJoinIterExt, ValueToStringRef, Vc,
+    FxIndexMap, OperationVc, ResolvedVc, TryFlatJoinIterExt, TryJoinIterExt, ValueToStringRef, Vc,
 };
 use turbo_tasks_fs::{FileContent, FileSystemPath, rebase};
 use turbo_tasks_hash::{encode_hex, hash_xxh3_hash64};
 use turbopack_core::{
     asset::{Asset, AssetContent},
     issue::{Issue, IssueExt, IssueSeverity, IssueStage, StyledString},
-    output::{ExpandedOutputAssets, OutputAsset, OutputAssets},
-    reference::all_assets_from_entries,
+    output::{ExpandedOutputAssets, OutputAsset},
 };
-
-/// Emits all assets transitively reachable from the given chunks, that are
-/// inside the node root or the client root.
-///
-/// Assets inside the given client root are rebased to the given client output
-/// path.
-#[turbo_tasks::function]
-pub async fn emit_all_assets(
-    assets: Vc<OutputAssets>,
-    node_root: FileSystemPath,
-    client_relative_path: FileSystemPath,
-    client_output_path: FileSystemPath,
-) -> Result<()> {
-    emit_assets(
-        all_assets_from_entries(assets),
-        node_root,
-        client_relative_path,
-        client_output_path,
-    )
-    .as_side_effect()
-    .await?;
-    Ok(())
-}
 
 /// Emits all assets transitively reachable from the given chunks, that are
 /// inside the node root or the client root.
@@ -46,7 +22,7 @@ pub async fn emit_all_assets(
 /// path.
 #[turbo_tasks::function]
 pub async fn emit_assets(
-    assets: Vc<ExpandedOutputAssets>,
+    assets: OperationVc<ExpandedOutputAssets>,
     node_root: FileSystemPath,
     client_relative_path: FileSystemPath,
     client_output_path: FileSystemPath,
@@ -56,6 +32,7 @@ pub async fn emit_assets(
         Client,
     }
     let assets = assets
+        .read_strongly_consistent()
         .await?
         .iter()
         .copied()

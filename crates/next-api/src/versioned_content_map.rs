@@ -162,7 +162,7 @@ impl VersionedContentMap {
 
         // Make sure all written client assets are up-to-date
         emit_assets(
-            assets_operation.connect(),
+            assets_operation,
             node_root,
             client_relative_path,
             client_output_path,
