@@ -1261,80 +1261,60 @@ impl<B: Backend> Executor<TurboTasks<B>, ScheduledTask, Reverse<TaskExecutionOrd
                 let this2 = this.clone();
                 let this = this.clone();
                 let future = async move {
-                    let mut current_execution_order = execution_order;
-                    loop {
-                        // it's okay for execution ids to overflow and wrap, they're just used for
-                        // an assert
-                        let execution_id = this.execution_id_factory.wrapping_get();
-                        let current_task_state = Arc::new(RwLock::new(CurrentTaskState::new(
-                            task_id,
-                            execution_id,
-                            current_execution_order,
-                            false, // in_top_level_task
-                        )));
-                        let single_execution_future = async {
-                            if this.stopped.load(Ordering::Acquire) {
-                                this.backend.task_execution_canceled(task_id, &*this);
-                                return None;
-                            }
-
-                            let TaskExecutionSpec { future, span } =
-                                this.backend.try_start_task_execution(
-                                    task_id,
-                                    current_execution_order,
-                                    &*this,
-                                )?;
-
-                            async {
-                                let result = CaptureFuture::new(future).await;
-
-                                // wait for all spawned local tasks using `local` to finish
-                                wait_for_local_tasks().await;
-
-                                let result = match result {
-                                    Ok(Ok(raw_vc)) => Ok(raw_vc),
-                                    Ok(Err(err)) => Err(err.into()),
-                                    Err(err) => Err(TurboTasksExecutionError::Panic(Arc::new(err))),
-                                };
-
-                                let finished_state = this.finish_current_task_state();
-                                let cell_counters = CURRENT_TASK_STATE
-                                    .with(|ts| ts.write().unwrap().cell_counters.take().unwrap());
-                                this.backend.task_execution_completed(
-                                    task_id,
-                                    result,
-                                    &cell_counters,
-                                    #[cfg(feature = "verify_determinism")]
-                                    finished_state.stateful,
-                                    finished_state.has_invalidator,
-                                    &*this,
-                                )
-                            }
-                            .instrument(span)
-                            .await
-                        };
-                        let reschedule = CURRENT_TASK_STATE
-                            .scope(current_task_state, single_execution_future)
-                            .await;
-                        match reschedule {
-                            None => break,
-                            Some(stale_execution_order) => {
-                                if stale_execution_order >= current_execution_order {
-                                    // Fast path: the stale execution order is at least as high as
-                                    // the current execution
-                                    // order, so we can directly re-execute without
-                                    // going through the priority queue.
-                                    current_execution_order = stale_execution_order;
-                                } else {
-                                    // The stale execution order is lower than the current execution
-                                    // order. Re-schedule via
-                                    // the priority runner so higher-priority
-                                    // tasks can run first.
-                                    this.schedule(task_id, stale_execution_order);
-                                    break;
-                                }
-                            }
+                    // it's okay for execution ids to overflow and wrap, they're just used for
+                    // an assert
+                    let execution_id = this.execution_id_factory.wrapping_get();
+                    let current_task_state = Arc::new(RwLock::new(CurrentTaskState::new(
+                        task_id,
+                        execution_id,
+                        execution_order,
+                        false, // in_top_level_task
+                    )));
+                    let single_execution_future = async {
+                        if this.stopped.load(Ordering::Acquire) {
+                            this.backend.task_execution_canceled(task_id, &*this);
+                            return None;
                         }
+
+                        let TaskExecutionSpec { future, span } = this
+                            .backend
+                            .try_start_task_execution(task_id, execution_order, &*this)?;
+
+                        async {
+                            let result = CaptureFuture::new(future).await;
+
+                            // wait for all spawned local tasks using `local` to finish
+                            wait_for_local_tasks().await;
+
+                            let result = match result {
+                                Ok(Ok(raw_vc)) => Ok(raw_vc),
+                                Ok(Err(err)) => Err(err.into()),
+                                Err(err) => Err(TurboTasksExecutionError::Panic(Arc::new(err))),
+                            };
+
+                            let finished_state = this.finish_current_task_state();
+                            let cell_counters = CURRENT_TASK_STATE
+                                .with(|ts| ts.write().unwrap().cell_counters.take().unwrap());
+                            this.backend.task_execution_completed(
+                                task_id,
+                                result,
+                                &cell_counters,
+                                #[cfg(feature = "verify_determinism")]
+                                finished_state.stateful,
+                                finished_state.has_invalidator,
+                                &*this,
+                            )
+                        }
+                        .instrument(span)
+                        .await
+                    };
+                    let reschedule = CURRENT_TASK_STATE
+                        .scope(current_task_state, single_execution_future)
+                        .await;
+                    if let Some(stale_execution_order) = reschedule {
+                        // Re-schedule via the priority runner so higher-priority tasks can run
+                        // first.
+                        this.schedule(task_id, stale_execution_order);
                     }
                     this.finish_foreground_job();
                 };
