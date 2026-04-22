@@ -746,7 +746,7 @@ impl ModuleGraph {
         Ok(ReadRef::cell(graph))
     }
 
-    #[turbo_tasks::function(operation)]
+    #[turbo_tasks::function(operation, root)]
     async fn create(
         graphs: Vec<OperationVc<SingleModuleGraph>>,
         binding_usage: Option<OperationVc<BindingUsageInfo>>,
@@ -795,7 +795,7 @@ impl ModuleGraph {
         compute_style_groups(self, chunking_context, &config).await
     }
 
-    #[turbo_tasks::function]
+    #[turbo_tasks::function(root)]
     pub async fn async_module_info(self: Vc<Self>) -> Result<Vc<AsyncModulesInfo>> {
         // `compute_async_module_info` calls `module.is_self_async()`, so we need to again ignore
         // all issues such that they aren't emitted multiple times.
@@ -865,7 +865,7 @@ pub struct ModuleGraphLayer {
 
 #[turbo_tasks::value_impl]
 impl ModuleGraphLayer {
-    #[turbo_tasks::function(operation)]
+    #[turbo_tasks::function(operation, root)]
     async fn new(
         graph: OperationVc<SingleModuleGraph>,
         graph_idx: u32,
@@ -2064,7 +2064,7 @@ pub mod tests {
                 reverse_from_b: Vec<RcStr>,
             }
 
-            #[turbo_tasks::function(operation)]
+            #[turbo_tasks::function(operation, root)]
             async fn reverse_traversal_results_operation() -> Result<Vc<ReverseTraversalResults>> {
                 let fs = VirtualFileSystem::new_with_name(rcstr!("test"));
                 let root = fs.root().await?;
@@ -2317,7 +2317,7 @@ pub mod tests {
             module_to_name: FxHashMap<ResolvedVc<Box<dyn Module>>, RcStr>,
         }
 
-        #[turbo_tasks::function(operation)]
+        #[turbo_tasks::function(operation, root)]
         async fn setup_graph(
             entries: Vec<RcStr>,
             graph_entries: Vec<(RcStr, Vec<RcStr>)>,
