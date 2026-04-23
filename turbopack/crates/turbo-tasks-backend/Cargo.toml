@@ -13,7 +13,7 @@ bench = false
 workspace = true
 
 [features]
-default = []
+default = ["trace_task_details"]
 print_cache_item_size_with_compressed = ["print_cache_item_size", "dep:lzzzz"]
 print_cache_item_size = []
 no_fast_stale = []

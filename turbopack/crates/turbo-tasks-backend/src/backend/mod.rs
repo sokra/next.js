@@ -25,7 +25,7 @@ use parking_lot::{Condvar, Mutex};
 use rustc_hash::{FxHashMap, FxHashSet, FxHasher};
 use smallvec::{SmallVec, smallvec};
 use tokio::time::{Duration, Instant};
-use tracing::{Span, trace_span};
+use tracing::{Span, field::Empty, trace_span};
 use turbo_bincode::{TurboBincodeBuffer, new_turbo_bincode_decoder, new_turbo_bincode_encoder};
 use turbo_tasks::{
     CellId, FxDashMap, RawVc, ReadCellOptions, ReadCellTracking, ReadConsistency,
@@ -2340,8 +2340,10 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
         span.record("immutable", is_immutable || is_now_immutable);
 
         if !queue.is_empty() || !old_edges.is_empty() {
-            #[cfg(feature = "trace_task_completion")]
-            let _span = tracing::trace_span!("remove old edges and prepare new children").entered();
+            // #[cfg(feature = "trace_task_completion")]
+            let _span =
+                tracing::trace_span!("remove old edges and prepare new children", stats = Empty)
+                    .entered();
             // Remove outdated edges first, before removing in_progress+dirty flag.
             // We need to make sure all outdated edges are removed before the task can potentially
             // be scheduled and executed again
@@ -2365,6 +2367,11 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
         task_id: TaskId,
         output_dependent_tasks: SmallVec<[TaskId; 4]>,
     ) {
+        let _span = tracing::trace_span!(
+            "invalidate output dependent",
+            output_dependent_tasks = output_dependent_tasks.len()
+        )
+        .entered();
         debug_assert!(!output_dependent_tasks.is_empty());
 
         if output_dependent_tasks.len() > 1 {
@@ -2462,6 +2469,7 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
         ctx: &mut impl ExecuteContext<'_>,
         new_children: &FxHashSet<TaskId>,
     ) {
+        let _span = tracing::trace_span!("unfinished children").entered();
         debug_assert!(!new_children.is_empty());
 
         let mut queue = AggregationUpdateQueue::new();
@@ -2493,6 +2501,7 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
         task_id: TaskId,
         new_children: FxHashSet<TaskId>,
     ) -> bool {
+        let _span = tracing::trace_span!("connect").entered();
         debug_assert!(!new_children.is_empty());
 
         let mut task = ctx.task(task_id, TaskDataCategory::All);
@@ -2543,6 +2552,16 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
             && task
                 .get_activeness()
                 .is_some_and(|activeness| activeness.active_counter > 0);
+        // if new_children.len() > 1024 {
+        //     AggregationUpdateQueue::run(
+        //         AggregationUpdateJob::UpdateAggregationNumber {
+        //             task_id,
+        //             base_aggregation_number: LEAF_NUMBER,
+        //             distance: None,
+        //         },
+        //         ctx,
+        //     );
+        // }
         connect_children(
             ctx,
             task_id,
@@ -2568,6 +2587,7 @@ impl<B: BackingStorage> TurboTasksBackendInner<B> {
             auto_hash_map::AutoMap<CellId, InProgressCellState, BuildHasherDefault<FxHasher>, 1>,
         >,
     ) {
+        let _span = tracing::trace_span!("finish").entered();
         let mut task = ctx.task(task_id, TaskDataCategory::All);
         let Some(in_progress) = task.take_in_progress() else {
             panic!("Task execution completed, but task is not in progress: {task:#?}");

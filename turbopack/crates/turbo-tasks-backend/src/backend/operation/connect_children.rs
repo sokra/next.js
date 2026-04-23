@@ -1,5 +1,6 @@
 use rustc_hash::FxHashSet;
 use smallvec::SmallVec;
+use tracing::field::Empty;
 use turbo_tasks::{
     TaskId,
     scope::scope_and_block,
@@ -109,9 +110,10 @@ pub fn connect_children(
         }
 
         {
-            #[cfg(feature = "trace_task_completion")]
-            let _span = tracing::trace_span!("connect new children").entered();
-            queue.execute(ctx);
+            // #[cfg(feature = "trace_task_completion")]
+            let span = tracing::trace_span!("connect new children", stats = Empty).entered();
+            let stats = queue.execute_with_stats(ctx);
+            span.record("stats", tracing::field::debug(stats));
         }
     }
 

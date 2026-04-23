@@ -3,6 +3,7 @@ use std::mem::take;
 use bincode::{Decode, Encode};
 use rustc_hash::FxHashSet;
 use smallvec::SmallVec;
+use tracing::Span;
 use turbo_tasks::TaskId;
 
 use crate::{
@@ -222,6 +223,7 @@ impl Operation for CleanupOldEdgesOperation {
                 }
                 CleanupOldEdgesOperation::AggregationUpdate { ref mut queue } => {
                     if queue.process(ctx) {
+                        Span::current().record("stats", tracing::field::debug(queue.stats()));
                         self = CleanupOldEdgesOperation::Done;
                     }
                 }
