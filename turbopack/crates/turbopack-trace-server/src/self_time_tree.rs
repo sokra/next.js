@@ -38,7 +38,7 @@ impl<T> Default for SelfTimeTree<T> {
     }
 }
 
-impl<T: PartialEq> SelfTimeTree<T> {
+impl<T> SelfTimeTree<T> {
     pub fn new() -> Self {
         Self::default()
     }
@@ -48,17 +48,12 @@ impl<T: PartialEq> SelfTimeTree<T> {
     }
 
     pub fn insert(&mut self, start: Timestamp, end: Timestamp, item: T) {
-        self.insert_without_check(start, end, item);
+        self.count += 1;
+        self.entries.push(SelfTimeEntry { start, end, item });
         self.check_for_split();
     }
 
     fn insert_without_check(&mut self, start: Timestamp, end: Timestamp, item: T) {
-        for entry in self.entries.iter_mut().rev() {
-            if entry.end == start && entry.item == item {
-                entry.end = end;
-                return;
-            }
-        }
         self.count += 1;
         self.entries.push(SelfTimeEntry { start, end, item });
     }
