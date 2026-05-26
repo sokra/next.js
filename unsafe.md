@@ -440,4 +440,268 @@ align_of::<T>())`. If `align_of::<U>() != align_of::<T>()`, `from_raw` could
   site, so they're scoped to the user-declared trait hierarchy. Sound.
 - Severity: Note
 
-### F-030 `turbo-bincode/src/lib.rs:116` SliceReader unsafe block — pending inspection
+### F-030 `turbo-bincode/src/lib.rs:116` SliceReader unsafe block — Note (sound)
+
+- Location: `turbopack/crates/turbo-bincode/src/lib.rs:103-130`
+- Category: `copy_nonoverlapping` after a `split_at_checked` bounds check.
+- Claim: head and target_buffer are non-overlapping slices (one is a read from
+  self.buffer, the other is the caller-provided buffer; aliasing would violate
+  Rust's borrowing rules).
+- Severity: Note
+
+### F-031 `versioned_content_map.rs` HACK `unsafe impl OperationValue` — Medium (documented hack)
+
+- Location: `crates/next-api/src/versioned_content_map.rs:28,63`
+- Category: `unsafe impl OperationValue for MapEntry`/`PathToOutputOperation`
+  where the inner contains `ResolvedVc`/`FxHashMap<…ResolvedVc…>`.
+- Claim: comment says "This is technically incorrect because path_to_asset
+  contains ResolvedVc..." — `OperationValue` is defined as "does not contain any
+  instances of `Vc` or `ResolvedVc`; may contain `OperationVc`". This violates
+  the trait's invariant.
+- Issue: per the runtime assertions in turbo-tasks documentation, this might
+  fail with a runtime panic rather than UB ("There are currently runtime
+  assertions in place as a fallback to ensure memory safety, but those
+  assertions may become debug-only in the future" — see `vc/local.rs:28-29`).
+  Once the runtime assertions become debug-only, this `unsafe impl` would
+  produce UB when the `ResolvedVc` is stored in a State across task boundaries
+  and serialized/deserialized — the inner `ResolvedVc` would not get re-resolved
+  on read.
+- Severity: Medium (a real future-UB hazard; explicitly flagged by author)
+- Suggestion: refactor `path_to_asset` to use `FxHashMap<FileSystemPath,
+OperationVc<Box<dyn OutputAsset>>>` or store path/asset in a side table; or
+  convince yourself that the path-to-asset map is reconstructed on each task
+  invocation and remove the State storage.
+
+### F-032 `dotenv.rs::env::set_var/remove_var` — Note (sound under documented lock)
+
+- Location: `turbopack/crates/turbo-tasks-env/src/dotenv.rs:96,102`
+- Category: `unsafe fn std::env::{set,remove}_var` (Rust 1.84+ marked these
+  as `unsafe` because they're not thread-safe).
+- Claim: caller holds `&MutexGuard<()>` to serialize all env mutations.
+- Issue: this serializes against other Turbopack callers of `set_var`. But
+  process-global env state is not protected against parallel calls from other
+  crates (e.g. via libc setenv from a C library) or from JS via napi. Within
+  this crate's domain, sound.
+- Severity: Note
+
+### F-033 `LazySortedVec` Send/Sync + UnsafeCell + Once — Note (sound; subtle)
+
+- Location: `turbopack/crates/turbopack-trace-server/src/lazy_sorted_vec.rs:11-58`
+- Category: `unsafe impl Send/Sync` for `UnsafeCell<SmallVec<[T;1]>>` plus
+  `Once`-gated interior mutation in `deref`.
+- Claim: deref accesses `vec.get()` then `once.call_once(|| sort_and_shrink)`.
+  Multiple concurrent `&self` derefs are serialized at `call_once`: only one
+  thread runs the sort, the rest block until it completes. After that, all
+  threads read the now-sorted SmallVec via `&*ptr`. `Once`'s acquire/release
+  semantics publish the writes from the sorting thread to readers.
+- Issue: subtle. `Once::call_once` _must_ be the only path that mutates inside
+  `&self` access. The mutating methods (`push`, `retain_unordered`,
+  `iter_mut_unordered`) all take `&mut self`, which excludes concurrent `&self`
+  derefs via Rust's borrow checker. Plus `push` resets `self.once = Once::new()`
+  so the next deref re-sorts. Sound.
+- Severity: Note
+
+### F-034 `trace_writer::WriteGuard::buffer().unwrap_unchecked()` — Note (sound)
+
+- Location: `turbopack/crates/turbopack-trace-utils/src/trace_writer.rs:230-242`
+- Category: `Option::unwrap_unchecked` on an Option that's been initialized to
+  Some at the start of the struct's life and only ever replaced by Some.
+- Severity: Note
+
+### F-035 `span_ref.rs` / `span_graph_ref.rs` / `span_bottom_up_ref.rs` `SpanId::new_unchecked` — Note (sound)
+
+- Location: `turbopack/crates/turbopack-trace-server/src/span_ref.rs:38`;
+  `…/span_graph_ref.rs:37`; `…/span_bottom_up_ref.rs:25`
+- Category: `SpanId::new_unchecked(self.index << 1 [| 1])` constructing a
+  `NonZeroU32`/`NonZeroU64` from a (shifted) span index.
+- Claim: requires the shifted value to be non-zero. Index 0 with `<< 1` would
+  produce 0, which would be UB.
+- Issue: looking at the construction, span 0 likely exists in the store as a
+  valid first entry. Then `SpanRef.id() = SpanId::new_unchecked(0 << 1) = 0` —
+  that's a NonZero violation. **Suspicious.** I'd need to verify whether index 0
+  is reserved.
+- Severity: deferred / needs follow-up
+
+### F-036 `reader::turbopack::transmute<&mut Vec<TraceRow<'_>>, &mut Vec<TraceRow<'_>>>` — Note (sound)
+
+- Location: `turbopack/crates/turbopack-trace-server/src/reader/turbopack.rs:498-499`
+- Category: identity transmute that the compiler should already accept; the
+  comment indicates a lifetime erasure (the input and output are spelled the
+  same in source but elaborated to different lifetimes by inference).
+- Claim: the Vec is emptied at the end of the function, so no `TraceRow<'_>`
+  with the laundered lifetime escapes.
+- Severity: Note
+
+### F-037 `turbo-rcstr/src/lib.rs:napi_impl` — Note (sound)
+
+- Location: `turbopack/crates/turbo-rcstr/src/lib.rs:611-628`
+- Category: NAPI boundary; wraps `String::from_napi_value` etc.
+- Severity: Note
+
+### F-038 `next_api/utils.rs ToNapiValue for TurbopackResult` — Note (sound)
+
+- Location: `crates/next-napi-bindings/src/next_api/utils.rs:386-410`
+- Category: NAPI boundary; uses `JsUnknown::from_raw`, `cast::<JsObject>` after
+  type-check via `result.get_type()`.
+- Issue: the `unsafe { result.cast::<JsObject>() }` is gated by a runtime
+  `ValueType::Object` check (line 396), which is correct usage of NAPI's
+  `cast` API.
+- Severity: Note
+
+### F-039 `next-napi-bindings turbopack.rs from_napi_value for NapiRouteHas` — Note (sound)
+
+- Location: `crates/next-napi-bindings/src/turbopack.rs:162-188`
+- Category: NAPI boundary; standard manual `FromNapiValue` implementation.
+- Severity: Note
+
+### F-040 `rspack/crates/binding/src/lib.rs:107` plugin registration — Note (sound)
+
+- Location: `rspack/crates/binding/src/lib.rs:107`
+- Category: NAPI `FromNapiValue::from_napi_value(env.raw(), object.raw())` —
+  standard pattern for the rspack plugin macro.
+- Severity: Note
+
+### F-041 `turbopack-ecmascript` various `unsafe impl NonLocalValue` — Note (sound)
+
+- Location: `turbopack/crates/turbopack-ecmascript/src/utils.rs:250` (AstSyntaxContext);
+  `…/references/mod.rs:3718` (AstPath);
+  `…/module_graph/{traced_di_graph,chunk_group_info,mod}.rs:53,51,92`;
+  `…/dev-server/src/update/stream.rs:36`;
+  `…/turbopack-core/src/resolve/alias_map.rs:73`;
+  `turbo-tasks/src/graph/adjacency_map.rs:18`;
+  `turbo-tasks/src/id.rs:153`;
+  `turbo-tasks/src/invalidation.rs:58,61`.
+- Category: `unsafe impl NonLocalValue` / `OperationValue` for various types
+  that wrap third-party data (RoaringBitmap, swc syntax types) and only contain
+  primitive/static/`'static`-wrapper data.
+- Severity: Note (sound; the trait's invariant "no `Vc` or `ResolvedVc`
+  reachable in the type" is upheld in each case via inspection).
+
+### F-042 `next-napi-bindings utils.rs ToNapiValue::to_napi_value` — see F-038
+
+### F-043 `db.rs::Mmap::map`, `bin/sst_inspect.rs::Mmap::map`, `static_sorted_file.rs` mmap — see F-018
+
+### F-044 `string::from_utf8_unchecked` in base38, minify, BytesStr — Note (sound by construction)
+
+- Location: `turbopack/crates/turbo-tasks-hash/src/base38.rs:61`;
+  `turbopack/crates/turbopack-ecmascript/src/minify.rs:202`;
+  `turbopack/crates/turbo-rcstr/src/lib.rs:219`;
+  `turbopack/crates/turbo-tasks/src/macro_helpers.rs:132` (`const_concat`);
+  `turbopack/crates/turbopack-ecmascript/src/tree_shake/graph.rs:1737`.
+- Category: `String::from_utf8_unchecked` / `str::from_utf8_unchecked` where
+  the input is constructed from a known-ASCII alphabet (BASE38, BASE54) or
+  comes from a verified-UTF-8 source (SWC emitter output, `BytesStr`).
+- Severity: Note
+
+### F-045 `turbopack-trace-server::chunked_vec.rs` line 37 unsafe block — Note (sound)
+
+- Location: `turbopack/crates/turbopack-trace-server/src/chunked_vec.rs:36-39`
+- Category: array-of-`MaybeUninit` allocation init.
+- Severity: Note (see F-025)
+
+### F-046 `auto_hash_map::map.rs:659,731` `&mut *this` from raw — Note (sound)
+
+- Location: `turbopack/crates/turbo-tasks-auto-hash-map/src/map.rs:659,731`
+- Category: raw `*mut AutoMap` dereference inside `VacantEntry::insert` and
+  `VacantRawEntry::insert`. The raw pointer was captured at entry creation;
+  the `'a` lifetime of the entry forbids any other `&mut AutoMap` access in
+  the meantime.
+- Issue: standard `MapEntry`-style pattern. Correct.
+- Severity: Note
+
+### F-047 `compression.rs` `Arc::new_uninit_slice` + `assume_init` — Note (sound)
+
+- Location: `turbopack/crates/turbo-persistence/src/compression.rs:34-50`
+- Category: `Arc<[MaybeUninit<u8>]>` allocated, then `decompress_block` writes
+  the full slice (verified by length check), then `assume_init`.
+- Issue: the order is `assume_init` _before_ `decompress_block` (line 37,
+  before the write at line 40). Strictly speaking, `assume_init` for
+  `[MaybeUninit<u8>]` is sound for `u8` (no invalid bit patterns), but the
+  general rule is "assume_init only after full initialization". For `u8` only,
+  this is fine — and the subsequent `decompress_block(block, dest, …)` writes
+  all bytes before the buffer escapes the function. Sound for `u8` but the
+  pattern is slightly upside-down. Same for `Rc` path.
+- Severity: Note
+
+### F-048 `priority_runner.rs::drop_in_place + write` for in-place future replacement — Note (sound)
+
+- Location: `turbopack/crates/turbo-tasks/src/priority_runner.rs:309-313`
+- Category: drop a pinned future in place, write a new one in the same slot.
+- Claim: a worker holding a pinned future drops it, then writes a new future at
+  the same address (which is still pinned). The new future starts its life
+  pinned.
+- Issue: subtle but correct, as long as the new future doesn't observe state
+  from the previous future. The `*mut E::Future = future_slot` and
+  `future_slot.write(new_future)` writes via raw pointer, bypassing the borrow
+  checker. The pin contract requires that the memory location remains pinned
+  until the future is dropped — here it's dropped before the new future is
+  written, so the new future immediately becomes pinned at the same address.
+  Sound.
+- Severity: Note
+
+### F-049 `read_ref.rs` `transmute_copy<&ReadTarget, &'static ReadTarget>` — Note (sound)
+
+- Location: `turbopack/crates/turbo-tasks/src/read_ref.rs:171`
+- Category: lifetime laundering for iterator construction.
+- Claim: the `read_ref` field of `ReadRefIter` keeps the underlying Arc alive,
+  so the laundered `'static` reference remains valid for the iterator's
+  lifetime.
+- Issue: standard self-referential iterator pattern. Sound provided iter is
+  dropped before read_ref, which is the case via field declaration order.
+- Severity: Note
+
+### F-051 `rope.rs::Rope::decode` uninit `Vec::set_len` then read — High (latent UB)
+
+- Location: `turbopack/crates/turbo-tasks-fs/src/rope.rs:430-449`
+- Category: `Vec::with_capacity(length)` + `set_len(length)` + `reader.read(&mut bytes)`.
+- Claim (in code comment): "`read` writes to (does not read) `bytes` and will
+  return an error if exactly length bytes is not written, so no uninitialized
+  memory ever escapes this function." This claim is a _one-impl-specific_
+  promise.
+- Issue: `Decode<Context>` is implemented over arbitrary `D: Decoder<Context =
+Context>`. The `Decoder::reader().read(target_buffer)` API takes `&mut [u8]`,
+  and the function signature does **not** forbid reading from `target_buffer`
+  before writing. A user-provided `Reader` impl that hashes or memcmps the
+  buffer prior to filling it would read uninitialized memory — UB. (Reading
+  uninitialized memory through `&mut [u8]` is UB regardless of whether the
+  result is observed externally; see `https://doc.rust-lang.org/std/mem/union.MaybeUninit.html`.)
+- In-tree audit: turbo-bincode's `TurboBincodeReader::read` uses
+  `copy_nonoverlapping(head.as_ptr(), target_buffer.as_mut_ptr(), len)` which
+  writes (does not read) target_buffer — see F-030. Bincode's default
+  `SliceReader` is similar. So no current caller actually exploits this.
+- Severity: High (no current UB, but the safety claim is wrong in general).
+- Suggestion: change the contract to use `read_into_uninit` (bincode's
+  uninit-aware API, if present), or buffer through `[u8; 256]` chunks, or
+  zero-initialize via `vec![0u8; length]` (the `clippy::uninit_vec` allow on
+  line 431 already acknowledges the problem).
+
+### F-052 `turbo-bincode::macro_helpers::transmute<&mut E, &mut TurboBincodeEncoder>` — Note (sound under `unty::type_equal`)
+
+- Location: `turbopack/crates/turbo-bincode/src/macro_helpers.rs:17-37,42-62`
+- Category: gated type-erased downcast of a generic encoder/decoder.
+- Claim: `unty::type_equal::<E, TurboBincodeEncoder>()` checks via type id;
+  if true, the encoder is the same type, transmute is sound.
+- Issue: `unty::type_equal` is documented to compare `TypeId` (or similar)
+  excluding lifetimes. Lifetimes do affect references' layouts in some
+  positions (e.g. when references contain trait objects with lifetime
+  bounds), but for plain `&mut E` where `E` doesn't carry a lifetime
+  parameter that affects layout, this is sound.
+- The comment in `decode_for_turbo_bincode_decode_impl` claims transmute
+  `&'a mut D -> &'a mut TurboBincodeDecoder<'a>`. `TurboBincodeDecoder<'a>` is
+  the type alias for an `EncoderImpl<TurboBincodeReader<'a>, …>`. If the
+  user's `D` has a different (longer) lifetime, layout is identical but the
+  laundered lifetime `'a` may borrow data shorter than the original. Within
+  the function body, the reference cannot escape, and any error would be
+  caught by `type_equal` returning false → `unreachable!()`.
+- Severity: Note (sound; well-documented; relies on `unty`'s correctness).
+- Suggestion: marking these `unsafe fn` makes the contract explicit (currently
+  they're safe wrappers); not strictly necessary since the `unsafe` block is
+  internal.
+
+### F-053 `next_api/utils.rs:392-394` `JsUnknown::from_raw` — Note (sound)
+
+- Location: `crates/next-napi-bindings/src/next_api/utils.rs:392-394`
+- Category: NAPI `JsUnknown::from_raw(env, result)` after `T::to_napi_value`.
+- Claim: `to_napi_value` returns a valid `napi_value` for `env`; `from_raw`
+  adopts it.
+- Severity: Note

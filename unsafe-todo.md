@@ -16,7 +16,7 @@ Tick `[x]` once the file's unsafe surface has been triaged and any findings note
 - [x] turbopack/crates/turbo-tasks-macros/src/value_trait_macro.rs (9) — F-029
 - [x] turbopack/crates/turbo-tasks/src/vc/read.rs (8) — F-014
 - [x] turbopack/crates/turbo-tasks-backend/src/utils/dash_map_multi.rs (8) — F-008
-- [ ] turbopack/crates/turbo-persistence/benches/mod.rs (8)
+- [x] turbopack/crates/turbo-persistence/benches/mod.rs (8) — sound (single-thread bench init)
 - [x] turbopack/crates/turbo-tasks/src/macro_helpers.rs (7) — sound (LazyLock-sync)
 - [x] turbopack/crates/turbo-persistence/src/static_sorted_file.rs (7) — F-018
 - [x] turbopack/crates/turbo-tasks/src/vc/mod.rs (6) — sound (link-error trick + Pin::map_unchecked_mut)
@@ -26,7 +26,7 @@ Tick `[x]` once the file's unsafe surface has been triaged and any findings note
 - [x] turbopack/crates/turbo-tasks/src/id.rs (5) — F-012
 - [x] turbopack/crates/turbo-tasks/src/event.rs (5) — sound (Pin::into_inner_unchecked on Unpin types)
 - [x] turbopack/crates/turbo-persistence/src/arc_bytes.rs (5) — F-019
-- [ ] crates/next-napi-bindings/src/next_api/utils.rs (5)
+- [x] crates/next-napi-bindings/src/next_api/utils.rs (5) — F-038
 
 ## Medium (~3-4)
 
@@ -45,7 +45,7 @@ Tick `[x]` once the file's unsafe surface has been triaged and any findings note
 - [x] turbopack/crates/turbo-tasks/src/util.rs (3) — F-011
 - [x] turbopack/crates/turbo-tasks/src/trait_ref.rs (3) — sound (Send/Sync via inner Arc<dyn Any+Send+Sync>)
 - [x] turbopack/crates/turbo-tasks/src/id_factory.rs (3) — sound (NonZeroU64::new_unchecked, id_offset>0)
-- [ ] turbopack/crates/turbo-tasks-malloc/src/memory_pressure.rs (3)
+- [x] turbopack/crates/turbo-tasks-malloc/src/memory_pressure.rs (3) — sound (FFI to libc/win32)
 - [x] turbopack/crates/turbo-tasks-backend/src/kv_backing_storage.rs (3) — F-022
 - [x] turbopack/crates/turbo-persistence/src/write_batch.rs (3) — F-022
 - [x] turbopack/crates/turbo-persistence/src/rc_bytes.rs (3) — F-019
@@ -53,50 +53,50 @@ Tick `[x]` once the file's unsafe surface has been triaged and any findings note
 ## Low (1-2)
 
 - [x] turbopack/crates/turbopack-ecmascript/src/lib.rs (2) — F-007
-- [ ] turbopack/crates/turbo-tasks/src/raw_vc.rs (2)
+- [x] turbopack/crates/turbo-tasks/src/raw_vc.rs (2) — F-050
 - [x] turbopack/crates/turbo-tasks/src/once_map.rs (2) — F-009
-- [ ] turbopack/crates/turbo-tasks/src/invalidation.rs (2)
+- [x] turbopack/crates/turbo-tasks/src/invalidation.rs (2) — F-041
 - [x] turbopack/crates/turbo-tasks-malloc/src/counter.rs (2) — F-027
 - [x] turbopack/crates/turbo-tasks-macros/src/value_impl_macro.rs (2) — F-029
-- [ ] turbopack/crates/turbo-tasks-env/src/dotenv.rs (2)
+- [x] turbopack/crates/turbo-tasks-env/src/dotenv.rs (2) — F-032
 - [x] turbopack/crates/turbo-tasks-backend/src/database/turbo/mod.rs (2) — F-022
 - [x] turbopack/crates/turbo-tasks-backend/src/backend/storage_schema.rs (2) — sound (ValueTypeId::new_unchecked(1) is constant)
-- [ ] turbopack/crates/turbo-tasks-auto-hash-map/src/map.rs (2)
-- [ ] turbopack/crates/turbo-persistence/src/shared_bytes.rs (2)
-- [ ] turbopack/crates/turbo-persistence/src/compression.rs (2)
+- [x] turbopack/crates/turbo-tasks-auto-hash-map/src/map.rs (2) — F-046
+- [x] turbopack/crates/turbo-persistence/src/shared_bytes.rs (2) — sound (unsafe fn trait contract)
+- [x] turbopack/crates/turbo-persistence/src/compression.rs (2) — F-047
 - [x] turbopack/crates/turbo-bincode/src/macro_helpers.rs (2) — F-028
 - [x] turbopack/crates/turbo-bincode/src/lib.rs (2) — sound (bounds-checked copy_nonoverlapping)
-- [ ] crates/next-napi-bindings/src/turbopack.rs (2)
-- [ ] crates/next-api/src/versioned_content_map.rs (2)
-- [ ] turbopack/crates/turbopack-trace-utils/src/trace_writer.rs (1)
-- [ ] turbopack/crates/turbopack-trace-server/src/span_ref.rs (1)
-- [ ] turbopack/crates/turbopack-trace-server/src/span_graph_ref.rs (1)
-- [ ] turbopack/crates/turbopack-trace-server/src/span_bottom_up_ref.rs (1)
-- [ ] turbopack/crates/turbopack-trace-server/src/reader/turbopack.rs (1)
-- [ ] turbopack/crates/turbopack-ecmascript/src/utils.rs (1)
-- [ ] turbopack/crates/turbopack-ecmascript/src/tree_shake/graph.rs (1)
-- [ ] turbopack/crates/turbopack-ecmascript/src/references/mod.rs (1)
-- [ ] turbopack/crates/turbopack-ecmascript/src/minify.rs (1)
-- [ ] turbopack/crates/turbopack-dev-server/src/update/stream.rs (1)
-- [ ] turbopack/crates/turbopack-core/src/resolve/alias_map.rs (1)
-- [ ] turbopack/crates/turbopack-core/src/module_graph/traced_di_graph.rs (1)
-- [ ] turbopack/crates/turbopack-core/src/module_graph/mod.rs (1)
-- [ ] turbopack/crates/turbopack-core/src/module_graph/chunk_group_info.rs (1)
-- [ ] turbopack/crates/turbo-tasks/src/task/function.rs (1)
-- [ ] turbopack/crates/turbo-tasks/src/read_ref.rs (1)
-- [ ] turbopack/crates/turbo-tasks/src/priority_runner.rs (1)
-- [ ] turbopack/crates/turbo-tasks/src/local_task_tracker.rs (1)
-- [ ] turbopack/crates/turbo-tasks/src/graph/visit.rs (1)
-- [ ] turbopack/crates/turbo-tasks/src/graph/adjacency_map.rs (1)
-- [ ] turbopack/crates/turbo-tasks-macros/src/value_macro.rs (1)
-- [ ] turbopack/crates/turbo-tasks-macros/src/derive/operation_value_macro.rs (1)
-- [ ] turbopack/crates/turbo-tasks-macros/src/derive/non_local_value_macro.rs (1)
-- [ ] turbopack/crates/turbo-tasks-macros-tests/tests/trybuild.rs (1)
-- [ ] turbopack/crates/turbo-tasks-hash/src/base38.rs (1)
-- [ ] turbopack/crates/turbo-tasks-fs/src/rope.rs (1)
-- [ ] turbopack/crates/turbo-tasks-backend/src/database/write_batch.rs (1)
-- [ ] turbopack/crates/turbo-tasks-backend/src/database/noop_kv.rs (1)
-- [ ] turbopack/crates/turbo-persistence/src/tests.rs (1)
-- [ ] turbopack/crates/turbo-persistence/src/db.rs (1)
-- [ ] turbopack/crates/turbo-persistence/src/bin/sst_inspect.rs (1)
-- [ ] rspack/crates/binding/src/lib.rs (1)
+- [x] crates/next-napi-bindings/src/turbopack.rs (2) — F-039
+- [x] crates/next-api/src/versioned_content_map.rs (2) — F-031
+- [x] turbopack/crates/turbopack-trace-utils/src/trace_writer.rs (1) — F-034
+- [x] turbopack/crates/turbopack-trace-server/src/span_ref.rs (1) — F-035
+- [x] turbopack/crates/turbopack-trace-server/src/span_graph_ref.rs (1) — F-035
+- [x] turbopack/crates/turbopack-trace-server/src/span_bottom_up_ref.rs (1) — F-035
+- [x] turbopack/crates/turbopack-trace-server/src/reader/turbopack.rs (1) — F-036
+- [x] turbopack/crates/turbopack-ecmascript/src/utils.rs (1) — F-041
+- [x] turbopack/crates/turbopack-ecmascript/src/tree_shake/graph.rs (1) — F-044
+- [x] turbopack/crates/turbopack-ecmascript/src/references/mod.rs (1) — F-041
+- [x] turbopack/crates/turbopack-ecmascript/src/minify.rs (1) — F-044
+- [x] turbopack/crates/turbopack-dev-server/src/update/stream.rs (1) — F-041
+- [x] turbopack/crates/turbopack-core/src/resolve/alias_map.rs (1) — F-041
+- [x] turbopack/crates/turbopack-core/src/module_graph/traced_di_graph.rs (1) — F-041
+- [x] turbopack/crates/turbopack-core/src/module_graph/mod.rs (1) — F-041
+- [x] turbopack/crates/turbopack-core/src/module_graph/chunk_group_info.rs (1) — F-041
+- [x] turbopack/crates/turbo-tasks/src/task/function.rs (1) — sound (test-only macro example)
+- [x] turbopack/crates/turbo-tasks/src/read_ref.rs (1) — F-049
+- [x] turbopack/crates/turbo-tasks/src/priority_runner.rs (1) — F-048
+- [x] turbopack/crates/turbo-tasks/src/local_task_tracker.rs (1) — F-023
+- [x] turbopack/crates/turbo-tasks/src/graph/visit.rs (1) — F-050
+- [x] turbopack/crates/turbo-tasks/src/graph/adjacency_map.rs (1) — F-041
+- [x] turbopack/crates/turbo-tasks-macros/src/value_macro.rs (1) — F-029
+- [x] turbopack/crates/turbo-tasks-macros/src/derive/operation_value_macro.rs (1) — F-029
+- [x] turbopack/crates/turbo-tasks-macros/src/derive/non_local_value_macro.rs (1) — F-029
+- [x] turbopack/crates/turbo-tasks-macros-tests/tests/trybuild.rs (1) — F-032
+- [x] turbopack/crates/turbo-tasks-hash/src/base38.rs (1) — F-044
+- [x] turbopack/crates/turbo-tasks-fs/src/rope.rs (1) — Note (set_len before read; sound under bincode reader)
+- [x] turbopack/crates/turbo-tasks-backend/src/database/write_batch.rs (1) — F-022
+- [x] turbopack/crates/turbo-tasks-backend/src/database/noop_kv.rs (1) — F-022
+- [x] turbopack/crates/turbo-persistence/src/tests.rs (1) — F-022
+- [x] turbopack/crates/turbo-persistence/src/db.rs (1) — F-018
+- [x] turbopack/crates/turbo-persistence/src/bin/sst_inspect.rs (1) — F-018
+- [x] rspack/crates/binding/src/lib.rs (1) — F-040
