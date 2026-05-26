@@ -6,16 +6,16 @@ Tick `[x]` once the file's unsafe surface has been triaged and any findings note
 
 ## High density (crate internals / `unsafe`-heavy)
 
-- [ ] turbopack/crates/turbo-tasks/src/marker_trait.rs (36)
-- [ ] turbopack/crates/turbo-rcstr/src/lib.rs (29)
-- [ ] turbopack/crates/turbo-rcstr/src/dynamic.rs (24)
+- [x] turbopack/crates/turbo-tasks/src/marker_trait.rs (36) — F-001
+- [x] turbopack/crates/turbo-rcstr/src/lib.rs (29) — F-002, F-003
+- [x] turbopack/crates/turbo-rcstr/src/dynamic.rs (24) — F-004
+- [x] turbopack/crates/turbo-rcstr/src/tagged_value.rs (8) — F-005
 - [ ] turbopack/crates/turbo-tasks-malloc/src/lib.rs (18)
 - [ ] turbopack/crates/turbo-tasks/src/tiny_vec.rs (16)
 - [ ] turbopack/crates/turbo-tasks/src/manager.rs (11)
 - [ ] turbopack/crates/turbo-tasks-macros/src/value_trait_macro.rs (9)
 - [ ] turbopack/crates/turbo-tasks/src/vc/read.rs (8)
 - [ ] turbopack/crates/turbo-tasks-backend/src/utils/dash_map_multi.rs (8)
-- [ ] turbopack/crates/turbo-rcstr/src/tagged_value.rs (8)
 - [ ] turbopack/crates/turbo-persistence/benches/mod.rs (8)
 - [ ] turbopack/crates/turbo-tasks/src/macro_helpers.rs (7)
 - [ ] turbopack/crates/turbo-persistence/src/static_sorted_file.rs (7)
