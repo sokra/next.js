@@ -1,32 +1,201 @@
-# Unsafe code audit — working findings
+# Unsafe Code Audit — Final Report
 
-This file is the **running notebook** of the unsafe audit. After all files in
-`unsafe-todo.md` are processed, this file will be rewritten into a polished
-report.
+**Repository:** sokra/next.js (turbopack + crates/\* + rspack/crates)
+**Branch:** `sokra/unsafe`
+**Scope:** every `unsafe` block, `unsafe fn`, `unsafe impl`, `unsafe trait` in the repository.
+**Audit date:** end of `sokra/unsafe` branch.
 
-Per-finding entries use the following structure:
+## 1. Executive summary
 
-```
-### <id> <Short title> — <severity>
-- Location: `path/to/file.rs:LINE` (and others if relevant)
-- Category: <Send/Sync | transmute | FFI | from_raw | …>
-- Claim:    <what the unsafe block is meant to guarantee>
-- Issue:    <what is wrong, missing, or under-documented>
-- Severity: Critical | High | Medium | Low | Note
-- Notes:    <optional caller analysis / suggested fix>
-```
+### Counts
 
-Severity rubric:
+- **Files containing `unsafe`:** 88
+- **Total `unsafe` occurrences:** 358 (excluding strings in comments)
+- **Files triaged:** 88 / 88 (100%)
+- **Distinct findings logged:** 52 (F-001 … F-054; F-042, F-043, F-050 and F-054 are
+  cross-references resolved to other IDs)
 
-- **Critical** — known unsoundness reproducible from safe API surface, UB likely in practice.
-- **High** — likely unsoundness; needs only a plausible caller to trigger.
-- **Medium** — fragile invariant relying on undocumented caller behavior, or unsoundness only with `unsafe` callers; or platform-specific risk.
-- **Low** — minor: missing `SAFETY:` comment, suboptimal API, defense-in-depth.
-- **Note** — sound but worth recording (e.g. macro-generated `unsafe impl`).
+### Severity distribution
 
----
+| Severity | Count | Findings                                                                       |
+| -------- | ----: | ------------------------------------------------------------------------------ |
+| Critical |     0 | —                                                                              |
+| High     |     1 | F-051                                                                          |
+| Medium   |     5 | F-006, F-016, F-022, F-028, F-031                                              |
+| Low      |     2 | F-002, F-003, F-004 (Low/Note boundary; counted under Note in body)            |
+| Note     |    44 | F-001, F-005, F-007–F-015, F-017–F-027, F-029, F-030, F-032–F-049, F-052–F-053 |
 
-## Findings
+Note: many "Note" items document soundness rationale that the codebase
+itself already explains in comments, but I record them so the audit is
+auditable end-to-end.
+
+### Top issues
+
+The audit found **no Critical unsoundness** that is directly reachable from
+the public/safe API.
+
+The most actionable hazards are:
+
+1. **F-051 (High) — `Rope::Decode` calls `Vec::set_len(length)` then passes
+   `&mut [u8]` over uninitialized memory to a generic `Decoder::reader().read`.**
+   The code's safety comment claims `read` "writes to (does not read)" the
+   buffer. That claim is correct for the in-tree readers
+   (`TurboBincodeReader::read` uses `copy_nonoverlapping`, see F-030, and
+   bincode's default `SliceReader` is similar), but the `Decode<Context>` impl
+   is generic over arbitrary `D: Decoder` and the trait signature accepts
+   `&mut [u8]`, which allows a future or third-party reader implementation to
+   read from the buffer before writing. That would be UB. Fix:
+   zero-initialize via `vec![0u8; length]`, or switch to a chunked stack
+   buffer.
+
+2. **F-006 (Medium) — `CrateMapWrapper`/`RegularMapWrapper` declare
+   `unsafe impl Send + Sync` for `sourcemap::DecodedMap`** but expose
+   `Deref<Target = DecodedMap>`, letting any caller invoke `&self` methods
+   that may use interior cache mutability. The wrapper's safety comment
+   acknowledges "must not use per-line access" but does not enforce it.
+   Verify against the pinned `sourcemap` version; consider locking or
+   eliminating `Deref` and exposing only thread-safe accessors.
+
+3. **F-016 (Medium) — `MetaFile` is a self-referential struct** with
+   `FilterRef<'static>` actually borrowing from `Mmap`, soundness preserved
+   only by Rust's _field declaration order_ drop semantics. A future
+   reordering of fields would silently corrupt drops. Add a
+   `static_assertions::assert_fields_in_order!` or convert to a
+   `selfref`-style helper.
+
+4. **F-022 (Medium) — `unsafe fn WriteBatch::flush(&self, family: u32)`** takes
+   `&self` despite needing exclusive access to its family's state. All current
+   callers satisfy the contract, but the API would be hard to use safely from
+   any future async/multi-shard context. Consider `&mut self` or splitting per
+   family.
+
+5. **F-028 (Medium) — turbo-bincode encoder/decoder type-erasure transmute.**
+   Marked Medium pending verification. After reading the code (F-052):
+   downgraded to Note. The `unty::type_equal` gate makes the transmute sound
+   today; soundness depends on `unty`'s implementation of `TypeId`-based
+   comparison.
+
+6. **F-031 (Medium) — `versioned_content_map.rs` "HACK" `unsafe impl
+OperationValue`** for types containing `ResolvedVc`, violating the trait's
+   invariant. Currently compensated by runtime assertions in turbo-tasks; once
+   those become debug-only (foreshadowed in `vc/local.rs:28-29`), this becomes
+   reachable UB. The author has already flagged this in comments.
+
+### Soundness highlights
+
+The codebase generally treats `unsafe` blocks with care:
+
+- Most `unsafe impl Send/Sync` impls carry explicit safety rationale comments
+  (`turbo-rcstr`, `turbo-persistence`, `dash_map_multi`).
+- The macro-generated `unsafe impl` blocks for `VcValueType`, `Upcast`,
+  `NonLocalValue`, and `OperationValue` are all gated by macros that emit
+  compile-time field-type assertions.
+- The `arbitrary_self_types`-based `Vc<T>` design uses an
+  `unsafe extern "C" fn` link-error trick to prevent accidental dereferences.
+- The most delicate self-referential code (turbo-persistence's mmap-borrowed
+  filters, F-016) is documented and uses field-order drop semantics, which is
+  the canonical Rust pattern.
+
+## 2. Methodology
+
+1. **Enumeration.** All 358 `unsafe` occurrences across 88 files were
+   collected via `grep -rn '\bunsafe\b' --include='*.rs'` (excluding the
+   comment-only matches, which dropped the count from 364 to 358).
+2. **Per-file triage.** Each file's `unsafe` surface was read in context with
+   the surrounding struct/function. Findings logged inline in `unsafe.md`
+   while processing. Trivial cases (NAPI conversions, NonZeroU16 unchecked
+   constructions, link-error tricks for Vc, mmap reads on immutable
+   files) were grouped together under shared finding IDs.
+3. **Deep dives.** Files with the highest concentration of suspicious
+   patterns received an extra pass: `turbo-rcstr` (tagged pointers,
+   inline strings, Arc rerooting), `turbo-tasks/util.rs` (chunked Vec
+   raw-parts), `turbo-tasks/scope.rs` (scoped tokio spawning),
+   `turbo-tasks-backend/utils/dash_map_multi.rs` (multi-shard refs),
+   `turbo-persistence/meta_file.rs` (self-referential mmap),
+   `turbopack-ecmascript/lib.rs` (CodeGenResultComments), and
+   `turbo-tasks-fs/rope.rs` (uninit Vec).
+4. **External validation.** Looked up upstream type definitions where the
+   safety story depends on third-party types (`swc_node_comments::SwcComments`
+   = `Arc<DashMap<…>>` confirmed; `qfilter::FilterRef` confirmed by-value
+   borrow). Did not run miri or kani.
+5. **Tooling.** No source modifications. No `cargo clippy` autofixes. Only
+   `git`, `grep`/`rg`, `Read`/`Edit` on the `unsafe.md` and `unsafe-todo.md`
+   notebooks.
+
+### Triage table (per-file → finding ID)
+
+See `unsafe-todo.md` for the per-file checklist with finding-ID references.
+Every file is marked complete.
+
+## 3. Recommendations
+
+Prioritized; each has a corresponding finding ID for context.
+
+### Immediate (correctness)
+
+- **R1 (F-051).** Replace `Vec::with_capacity(length)` + `set_len(length)` in
+  `Rope::Decode` with `vec![0u8; length]`, or use a stack chunk buffer. The
+  `clippy::uninit_vec` lint is currently silenced on this function; fixing
+  the underlying issue removes the lint allow.
+
+- **R2 (F-031).** Audit `versioned_content_map.rs` for the `OperationValue`
+  hack and either refactor the storage to avoid `ResolvedVc` keys/values
+  inside the `State` or commit to keeping the runtime assertions in
+  `turbo-tasks` non-debug.
+
+- **R3 (F-006).** Verify the pinned `sourcemap` crate version's actual
+  `DecodedMap` thread-safety. If it still has interior cache cells, replace
+  the unsafe `Deref<Target = DecodedMap>` with a wrapped accessor that
+  performs the lookups under a `Mutex` or otherwise guarantees serialization.
+
+### Hardening (defense-in-depth)
+
+- **R4 (F-016).** Pin `MetaFile`'s field order with a `assert_fields_in_order!`
+  static assertion, or migrate to a `selfref`-style helper.
+
+- **R5 (F-022).** Reconsider `WriteBatch::flush` as `&mut self` and shard
+  per-family `WriteBatch`s. Today's callers are safe; the API is dangerous
+  to extend.
+
+- **R6 (F-004).** Add a compile-time `const { assert!(align_of::<…>() >= 4) }`
+  to `new_atom_from_prehashed` for `DynamicPrehashedString`, mirroring the
+  one already on `new_static_atom`.
+
+- **R7 (F-007).** Remove the redundant `unsafe impl Send + Sync for
+CodeGenResultComments`; all current fields auto-derive. Replace with
+  `static_assertions::assert_impl_all!` to fail a future change that adds a
+  `!Send` field.
+
+### SAFETY-comment improvements (cosmetic / clarity)
+
+- **R8 (F-002, F-003).** Expand the unconditional `unsafe impl Send/Sync for
+RcStr` to a per-tag SAFETY breakdown.
+- **R9 (F-009).** Document the `'static` masquerade in
+  `OnceConcurrentlyMap::TemporarilyInserted` more explicitly.
+- **R10 (F-011).** Add a SAFETY block to `into_chunks` summarizing the chunk
+  disjointness invariant.
+- **R11 (F-012).** Replace the `transmute_copy(&&NonZero<T>)` trick in
+  `id.rs` with a more conventional reference cast.
+- **R12 (F-019).** Add inline SAFETY comments on `arc_bytes.rs` /
+  `rc_bytes.rs`'s `unsafe impl Send + Sync`.
+- **R13 (F-047).** Reorder `Arc::assume_init` to happen _after_
+  `decompress_block` writes in `compression.rs`, even though `u8` happens to
+  permit either order.
+
+### Suggested refactors to safe alternatives
+
+- **R14 (F-046).** Consider replacing `*mut AutoMap`-based `RawEntry`/
+  `VacantEntry` with a `&mut AutoMap`-keyed split-borrow API. The raw pointer
+  detour is needed only because `hashbrown` doesn't (or didn't) expose a
+  split API.
+- **R15 (F-008).** No change required, but consider whether the
+  `get_multiple_mut`'s runtime `assert!` could be replaced with a typestate
+  encoding (e.g. distinct return types when shards coincide). Not blocking.
+
+## 4. Findings (full detail)
+
+Below are the per-finding sections produced during triage. Each one cites a
+`file:line`, the safety claim, the actual issue, and a severity rating.
 
 ### F-001 `marker_trait::impl_auto_marker_trait!` blanket impls — Note (sound)
 
