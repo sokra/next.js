@@ -2,9 +2,10 @@ use anyhow::{Context, Result};
 use turbo_rcstr::{RcStr, rcstr};
 use turbo_tasks::{FxIndexSet, ResolvedVc, ValueToString, Vc};
 use turbo_tasks_fs::{FileContent, FileSystemPath};
+use turbo_tasks_hash::{DeterministicHasher, Xxh3Hash64Hasher};
 use turbopack_core::{
     asset::{Asset, AssetContent},
-    chunk::{Chunk, ChunkingContext, OutputChunk, OutputChunkRuntimeInfo},
+    chunk::{Chunk, ChunkingContext, ContentHashing, OutputChunk, OutputChunkRuntimeInfo},
     ident::AssetIdent,
     introspect::{Introspectable, IntrospectableChildren},
     output::{OutputAsset, OutputAssetsReference, OutputAssetsWithReferenced},
@@ -66,7 +67,11 @@ impl EcmascriptBrowserChunk {
         Ok(assets)
     }
 
-    async fn ident_for_path(&self) -> Result<Vc<AssetIdent>> {
+    pub(crate) fn ecmascript_chunk(&self) -> ResolvedVc<EcmascriptChunk> {
+        self.chunk
+    }
+
+    pub(crate) async fn ident_for_path(&self) -> Result<Vc<AssetIdent>> {
         Ok(self
             .chunk
             .ident()
@@ -166,10 +171,93 @@ impl OutputAsset for EcmascriptBrowserChunk {
     #[turbo_tasks::function]
     async fn path(self: Vc<Self>) -> Result<Vc<FileSystemPath>> {
         let this = self.await?;
-        let ident = this.ident_for_path().await?;
-        Ok(this
-            .chunking_context
-            .chunk_path(Some(Vc::upcast(self)), ident, None, rcstr!(".js")))
+        let path_info = this.chunking_context.chunk_path_info().await?;
+
+        let name = match path_info.chunk_content_hashing {
+            Some(ContentHashing::Direct { length }) => {
+                // Two-level hashing so mutual async-loader references cannot
+                // form a turbo-tasks cycle:
+                //
+                //  Level 1 – hash of estimated chunk content (no cross-chunk
+                //  path embeddings).  Computed independently per chunk.
+                //
+                //  Level 2 – hash of (salt || sorted closure of level-1
+                //  hashes of every browser chunk reachable through output-
+                //  asset references).  Depends only on level-1 hashes, which
+                //  are all independent, so there is no cycle.  Hashing the
+                //  full closure means any reachable content change propagates
+                //  to this chunk's path — preserving the original cache-
+                //  busting semantics.
+
+                // BFS over output-asset references to collect the closure.
+                let mut seen: FxIndexSet<ResolvedVc<EcmascriptBrowserChunk>> =
+                    FxIndexSet::default();
+                let mut queue: Vec<ResolvedVc<EcmascriptBrowserChunk>> =
+                    vec![self.to_resolved().await?];
+                while let Some(chunk) = queue.pop() {
+                    if !seen.insert(chunk) {
+                        continue;
+                    }
+                    let refs = chunk.references().await?;
+                    for &asset in refs.assets.await?.iter() {
+                        if let Some(bc) =
+                            ResolvedVc::try_downcast_type::<EcmascriptBrowserChunk>(asset)
+                        {
+                            if !seen.contains(&bc) {
+                                queue.push(bc);
+                            }
+                        }
+                    }
+                }
+
+                // Collect and sort level-1 hashes from the closure.
+                let mut l1s: Vec<u64> = Vec::with_capacity(seen.len());
+                for chunk in &seen {
+                    l1s.push(*chunk.base_hash().await?);
+                }
+                l1s.sort();
+
+                let own_l1 = self.base_hash().await?;
+                let salt = this.chunking_context.hash_salt().await?;
+                let mut hasher = Xxh3Hash64Hasher::new();
+                hasher.write_value(salt.as_str());
+                // Include this chunk's level-1 hash first so siblings
+                // within the same SCC get distinct filenames.
+                hasher.write_value(*own_l1);
+                for l1 in &l1s {
+                    hasher.write_value(*l1);
+                }
+                let l2 = hasher.finish();
+
+                let hash = turbo_tasks_hash::encode_base38(l2);
+                let hash = &hash[..length as usize];
+                format!("{hash}.js").into()
+            }
+            None => {
+                let ident = this.ident_for_path().await?;
+                ident
+                    .output_name(path_info.root_path.clone(), None, rcstr!(".js"))
+                    .owned()
+                    .await?
+            }
+        };
+
+        Ok(path_info.chunk_root_path.join(&name)?.cell())
+    }
+}
+
+#[turbo_tasks::value_impl]
+impl EcmascriptBrowserChunk {
+    /// Level-1 (base) hash: estimated chunk code without cross-chunk path
+    /// embeddings.  Safe to compute independently — no dependency on any
+    /// other chunk's path.
+    #[turbo_tasks::function]
+    pub(crate) async fn base_hash(self: Vc<Self>) -> Result<Vc<u64>> {
+        let content = self.own_content().estimated_code();
+        let rope = content.to_rope_with_magic_comments(|| self.source_map()).await?;
+        let mut hasher = Xxh3Hash64Hasher::new();
+        DeterministicHasher::write_bytes(&mut hasher, rope.to_bytes().as_ref());
+        Ok(Vc::cell(hasher.finish()))
     }
 }
 

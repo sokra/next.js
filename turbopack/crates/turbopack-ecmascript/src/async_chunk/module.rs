@@ -168,22 +168,6 @@ impl EcmascriptChunkPlaceable for AsyncLoaderModule {
             ..Default::default()
         };
 
-        if estimated {
-            let code = formatdoc! {
-                r#"
-                    {TURBOPACK_EXPORT_VALUE}((parentImport) => {{
-                        return Promise.all([].map((chunk) => {TURBOPACK_LOAD}(chunk))).then(() => {{}});
-                    }});
-                "#,
-            };
-            return Ok(EcmascriptChunkItemContent {
-                inner_code: code.into(),
-                options,
-                ..Default::default()
-            }
-            .cell());
-        }
-
         let this = self.await?;
 
         let id = if let Some(placeable) =
@@ -194,6 +178,40 @@ impl EcmascriptChunkPlaceable for AsyncLoaderModule {
             None
         };
         let id = id.as_ref();
+
+        if estimated {
+            // Estimated content mirrors the real code structure but uses the
+            // module id in place of chunk paths so the task graph stays acyclic.
+            let code = match id {
+                Some(id) => {
+                    formatdoc! {
+                        r#"
+                            {TURBOPACK_EXPORT_VALUE}((parentImport) => {{
+                                return Promise.all([{{path:{id:#}}}].map((chunk) => {TURBOPACK_LOAD}(chunk))).then(() => {{
+                                    return parentImport({id});
+                                }});
+                            }});
+                        "#,
+                        id = StringifyModuleId(id),
+                    }
+                }
+                None => {
+                    formatdoc! {
+                        r#"
+                            {TURBOPACK_EXPORT_VALUE}((parentImport) => {{
+                                return Promise.all([{{path:"chunk"}}].map((chunk) => {TURBOPACK_LOAD}(chunk))).then(() => {{}});
+                            }});
+                        "#,
+                    }
+                }
+            };
+            return Ok(EcmascriptChunkItemContent {
+                inner_code: code.into(),
+                options,
+                ..Default::default()
+            }
+            .cell());
+        }
 
         let chunks_data = self.chunks_data(module_graph).await?;
         let chunks_data = chunks_data.iter().try_join().await?;

@@ -7,7 +7,7 @@ use turbopack_core::{
     chunk::{
         AsyncModuleInfo, ChunkData, ChunkGroupType, ChunkableModule, ChunkingContext,
         ChunkingContextExt, ChunkingType, ChunksData, EvaluatableAsset, ModuleChunkItemIdExt,
-        ModuleId, availability_info::AvailabilityInfo,
+        availability_info::AvailabilityInfo,
     },
     context::AssetContext,
     file_source::FileSource,
@@ -257,20 +257,37 @@ impl EcmascriptChunkPlaceable for WorkerLoaderModule {
         };
 
         if estimated {
-            // In estimation mode we cannot call into chunking context APIs
-            // otherwise we will induce a turbo tasks cycle. But we only need an
-            // approximate solution. We'll use the same estimate for both web
-            // and Node.js workers.
-            let fake_id = ModuleId::String(rcstr!("a_fake_module"));
-            return Ok(EcmascriptChunkItemContent {
-                inner_code: formatdoc! {
-                    r#"
-                        {TURBOPACK_EXPORT_VALUE}({TURBOPACK_REQUIRE}({workers_module})["default"](__dirname + "/" + {worker_path:#}));
-                    "#,
-                    worker_path = StringifyJs(&"a_fake_path_for_size_estimation"),
-                    workers_module = StringifyModuleId(&fake_id),
+            // Estimated content mirrors the real code structure but avoids
+            // calling chunking-context APIs (chunks_data / chunk_group) that
+            // would create turbo-tasks cycles with ContentHashing::Direct.
+            let inner_ident = this.inner.ident().to_string().owned().await?;
+            let create_worker_id = self
+                .create_worker_module()
+                .chunk_item_id(chunking_context)
+                .await?;
+            let code = match this.worker_type {
+                WorkerType::WebWorker | WorkerType::SharedWebWorker => {
+                    formatdoc! {
+                        r#"
+                            {TURBOPACK_EXPORT_VALUE}({TURBOPACK_REQUIRE}({workers_module})["default"]({entrypoint}, [{chunk}]));
+                        "#,
+                        entrypoint = StringifyJs(&inner_ident),
+                        chunk = StringifyJs(&EcmascriptChunkData::Simple(&inner_ident)),
+                        workers_module = StringifyModuleId(&create_worker_id),
+                    }
                 }
-                .into(),
+                WorkerType::NodeWorkerThread => {
+                    formatdoc! {
+                        r#"
+                            {TURBOPACK_EXPORT_VALUE}({TURBOPACK_REQUIRE}({workers_module})["default"](__dirname + "/" + {worker_path:#}));
+                        "#,
+                        worker_path = StringifyJs(&inner_ident),
+                        workers_module = StringifyModuleId(&create_worker_id),
+                    }
+                }
+            };
+            return Ok(EcmascriptChunkItemContent {
+                inner_code: code.into(),
                 options,
                 ..Default::default()
             }
