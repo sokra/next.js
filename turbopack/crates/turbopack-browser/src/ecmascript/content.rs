@@ -3,11 +3,11 @@ use std::io::Write;
 use anyhow::Result;
 use either::Either;
 use turbo_rcstr::RcStr;
-use turbo_tasks::{ResolvedVc, Vc, turbobail};
+use turbo_tasks::{ResolvedVc, ValueToString, Vc, turbobail};
 use turbo_tasks_fs::{File, FileContent};
 use turbopack_core::{
     asset::AssetContent,
-    chunk::{ChunkingContext, MinifyType, ModuleId},
+    chunk::{Chunk, ChunkingContext, MinifyType, ModuleId},
     code_builder::{Code, CodeBuilder},
     output::OutputAsset,
     source_map::{GenerateSourceMap, SourceMapAsset},
@@ -105,6 +105,65 @@ impl EcmascriptBrowserChunkContent {
         let mut chunk_items = content.chunk_item_code_module_ids_and_paths().await?;
         // Sort items by their module path so that similar modules stay
         // together so that the chunks gzips better.
+        chunk_items.sort_by(|a, b| {
+            a.first()
+                .map(|(id, _, path)| (path, id))
+                .cmp(&b.first().map(|(id, _, path)| (path, id)))
+        });
+        for item in &chunk_items {
+            for (id, item_code, _) in &**item {
+                write!(code, "\n{}, ", StringifyJs(id))?;
+                code.push_code(item_code);
+                write!(code, ",")?;
+            }
+        }
+
+        write!(code, "\n]);")?;
+
+        let mut code = code.build();
+
+        if let MinifyType::Minify { mangle } = *this.chunking_context.minify_type().await? {
+            code = minify(code, source_maps, mangle)?;
+        }
+
+        Ok(code.cell())
+    }
+
+    /// Like [`code`] but uses estimated chunk item content so the result
+    /// does not embed other chunks' paths.  Safe to hash for chunk path
+    /// computation without creating cycles.
+    #[turbo_tasks::function]
+    pub(crate) async fn estimated_code(self: Vc<Self>) -> Result<Vc<Code>> {
+        let this = self.await?;
+        let source_maps = *this
+            .chunking_context
+            .reference_chunk_source_maps(*ResolvedVc::upcast(this.chunk))
+            .await?;
+        // Placeholder for the chunk's own path — uses the ecmascript chunk
+        // ident so the hash is unique per chunk structure.
+        let chunk_ident = this
+            .chunk
+            .await?
+            .ecmascript_chunk()
+            .ident()
+            .to_string()
+            .await?;
+        let script_or_path = StringifyJs(&chunk_ident);
+        let mut code = CodeBuilder::new(
+            source_maps,
+            *this.chunking_context.debug_ids_enabled().await?,
+        );
+        let chunk_loading_global = this.chunking_context.chunk_loading_global().await?;
+        write!(
+            code,
+            r#"(globalThis[{chunk_loading_global}] || (globalThis[{chunk_loading_global}] = [])).push([{script_or_path},"#,
+            chunk_loading_global = StringifyJs(&chunk_loading_global),
+        )?;
+
+        let content = this.content.await?;
+        let mut chunk_items = content
+            .chunk_item_code_module_ids_and_paths_estimated()
+            .await?;
         chunk_items.sort_by(|a, b| {
             a.first()
                 .map(|(id, _, path)| (path, id))

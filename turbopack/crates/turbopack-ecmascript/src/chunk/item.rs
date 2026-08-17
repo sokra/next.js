@@ -259,16 +259,33 @@ pub trait EcmascriptChunkItem: ChunkItem + OutputAssetsReference {
 pub trait EcmascriptChunkItemExt {
     /// Generates the module factory for this chunk item.
     fn code(self: Vc<Self>, async_module_info: Option<Vc<AsyncModuleInfo>>) -> Vc<Code>;
+
+    /// Generates a module factory that does not embed other chunks' paths,
+    /// safe to hash for ContentHashing::Direct without creating cycles.
+    fn estimated_code(
+        self: Vc<Self>,
+        async_module_info: Option<Vc<AsyncModuleInfo>>,
+    ) -> Vc<Code>;
 }
 
 impl<T> EcmascriptChunkItemExt for T
 where
     T: Upcast<Box<dyn EcmascriptChunkItem>>,
 {
-    /// Generates the module factory for this chunk item.
     fn code(self: Vc<Self>, async_module_info: Option<Vc<AsyncModuleInfo>>) -> Vc<Code> {
         module_factory_with_code_generation_issue(Vc::upcast_non_strict(self), async_module_info)
             .to_code()
+    }
+
+    fn estimated_code(
+        self: Vc<Self>,
+        async_module_info: Option<Vc<AsyncModuleInfo>>,
+    ) -> Vc<Code> {
+        estimated_module_factory_with_code_generation_issue(
+            Vc::upcast_non_strict(self),
+            async_module_info,
+        )
+        .to_code()
     }
 }
 
@@ -306,6 +323,59 @@ async fn module_factory_with_code_generation_issue(
                 path: chunk_item.asset_ident().await?.path.clone(),
                 title: StyledString::Text(rcstr!("Code generation for chunk item errored"))
                     .resolved_cell(),
+                message: StyledString::Text(error_message).resolved_cell(),
+                source: None,
+            }
+            .resolved_cell()
+            .emit();
+            let mut code = CodeBuilder::default();
+            code += "(() => {{\n\n";
+            writeln!(code, "throw new Error({error});", error = js_error_message)?;
+            code += "\n}})";
+            *code.build().cell_persisted()
+        }
+    })
+}
+
+/// Like [`module_factory_with_code_generation_issue`] but calls
+/// `content_with_async_module_info` with `estimated: true`, so chunk items
+/// return code that does not embed other chunks' paths.  The result is
+/// safe to hash for `ContentHashing::Direct` without creating turbo-tasks
+/// cycles.
+#[turbo_tasks::function]
+async fn estimated_module_factory_with_code_generation_issue(
+    chunk_item: Vc<Box<dyn EcmascriptChunkItem>>,
+    async_module_info: Option<Vc<AsyncModuleInfo>>,
+) -> Result<Vc<PersistedCode>> {
+    async fn get_content(
+        chunk_item: Vc<Box<dyn EcmascriptChunkItem>>,
+        async_module_info: Option<Vc<AsyncModuleInfo>>,
+    ) -> Result<ResolvedVc<PersistedCode>> {
+        let chunk_item_ref = chunk_item.into_trait_ref().await?;
+        let content = chunk_item_ref
+            .content_with_async_module_info(async_module_info, true)
+            .await?
+            .await?;
+        content.module_factory().await
+    }
+    let content = get_content(chunk_item, async_module_info).await;
+    Ok(match content {
+        Ok(factory) => *factory,
+        Err(error) => {
+            let id = chunk_item.asset_ident().to_string().await;
+            let id = id.as_ref().map_or_else(|_| "unknown", |id| &**id);
+            let error = error.context(format!(
+                "An error occurred while generating the estimated chunk item {id}"
+            ));
+            let error_message = format!("{}", PrettyPrintError(&error)).into();
+            let js_error_message = serde_json::to_string(&error_message)?;
+            CodeGenerationIssue {
+                severity: IssueSeverity::Error,
+                path: chunk_item.asset_ident().await?.path.clone(),
+                title: StyledString::Text(rcstr!(
+                    "Code generation for estimated chunk item errored"
+                ))
+                .resolved_cell(),
                 message: StyledString::Text(error_message).resolved_cell(),
                 source: None,
             }

@@ -9,6 +9,8 @@ use crate::chunk::{
     CodeModuleIdsAndPaths,
     batch::{EcmascriptChunkItemBatchGroup, EcmascriptChunkItemOrBatchWithAsyncInfo},
     batch_group_code_module_ids_and_paths, item_code_module_ids_and_paths,
+    batch_group_code_module_ids_and_paths_estimated,
+    item_code_module_ids_and_paths_estimated,
 };
 
 #[turbo_tasks::value(shared)]
@@ -57,6 +59,20 @@ impl EcmascriptChunkContent {
             &self.chunk_items,
             |batch| batch_group_code_module_ids_and_paths(batch).into_future(),
             |item| item_code_module_ids_and_paths(item.clone()).into_future(),
+        )
+        .await
+    }
+
+    /// Like [`chunk_item_code_module_ids_and_paths`] but uses `estimated: true`
+    /// chunk item content, avoiding chunk-path dependencies.
+    pub async fn chunk_item_code_module_ids_and_paths_estimated(
+        &self,
+    ) -> Result<Vec<ReadRef<CodeModuleIdsAndPaths>>> {
+        batch_info(
+            &self.batch_groups,
+            &self.chunk_items,
+            |batch| batch_group_code_module_ids_and_paths_estimated(batch).into_future(),
+            |item| item_code_module_ids_and_paths_estimated(item.clone()).into_future(),
         )
         .await
     }

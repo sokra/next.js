@@ -609,7 +609,7 @@ impl BrowserChunkingContext {
 
     /// Returns the chunk path information.
     #[turbo_tasks::function]
-    fn chunk_path_info(&self) -> Vc<ChunkPathInfo> {
+    pub(crate) fn chunk_path_info(&self) -> Vc<ChunkPathInfo> {
         ChunkPathInfo {
             root_path: self.root_path.clone(),
             chunk_root_path: self.chunk_root_path.clone(),
@@ -1303,10 +1303,10 @@ impl ChunkingContext for BrowserChunkingContext {
 }
 
 #[turbo_tasks::value]
-struct ChunkPathInfo {
-    root_path: FileSystemPath,
-    chunk_root_path: FileSystemPath,
-    chunk_content_hashing: Option<ContentHashing>,
+pub(crate) struct ChunkPathInfo {
+    pub(crate) root_path: FileSystemPath,
+    pub(crate) chunk_root_path: FileSystemPath,
+    pub(crate) chunk_content_hashing: Option<ContentHashing>,
 }
 
 #[turbo_tasks::value(shared)]

@@ -33,6 +33,8 @@ pub use self::{
     code_module_ids_and_paths::{
         BatchGroupCodeModuleIdsAndPaths, CodeModuleIdsAndPaths,
         batch_group_code_module_ids_and_paths, item_code_module_ids_and_paths,
+        batch_group_code_module_ids_and_paths_estimated,
+        item_code_module_ids_and_paths_estimated,
     },
     content::EcmascriptChunkContent,
     content_entry::{EcmascriptChunkContentEntries, EcmascriptChunkContentEntry},
