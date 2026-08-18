@@ -48,7 +48,6 @@ use crate::{
         transforms::get_next_client_transforms_rules,
     },
     next_config::NextConfig,
-    next_font::local::NextFontLocalResolvePlugin,
     next_import_map::{
         get_next_client_fallback_import_map, get_next_client_import_map,
         get_next_client_resolved_map,
@@ -166,11 +165,13 @@ pub async fn get_client_resolve_options_context(
         || *next_config
             .enable_expose_testing_api_in_production_build()
             .await?;
+    let concurrent_router_queue = *next_config.enable_concurrent_router_queue().await?;
     let next_client_resolved_map = get_next_client_resolved_map(
         project_path.clone(),
         project_path.clone(),
         *mode.await?,
         expose_testing_api,
+        concurrent_router_queue,
     )
     .await?
     .to_resolved()
@@ -189,11 +190,6 @@ pub async fn get_client_resolve_options_context(
         resolved_map: Some(next_client_resolved_map),
         browser: true,
         module: true,
-        before_resolve_plugins: vec![ResolvedVc::upcast(
-            NextFontLocalResolvePlugin::new(project_path.clone())
-                .to_resolved()
-                .await?,
-        )],
         after_resolve_plugins: vec![ResolvedVc::upcast(
             NextSharedRuntimeResolvePlugin::new(project_path.clone())
                 .to_resolved()
@@ -377,6 +373,7 @@ pub async fn get_client_module_options_context(
             source_maps,
             infer_module_side_effects: *next_config.turbopack_infer_module_side_effects().await?,
             cjs_tree_shaking: *next_config.turbopack_cjs_tree_shaking().await?,
+            cjs_scope_hoisting: *next_config.turbopack_cjs_scope_hoisting().await?,
             preset_env_config,
             ..Default::default()
         },
@@ -488,6 +485,7 @@ pub struct ClientChunkingContextOptions {
     pub scope_hoisting: Vc<bool>,
     pub nested_async_chunking: Vc<bool>,
     pub shared_runtime: Vc<bool>,
+    pub per_page_module_graph: Vc<bool>,
     pub debug_ids: Vc<bool>,
     pub worker_asset_prefix: Vc<Option<RcStr>>,
     pub should_use_absolute_url_references: Vc<bool>,
@@ -536,6 +534,7 @@ pub async fn get_client_chunking_context(
         scope_hoisting,
         nested_async_chunking,
         shared_runtime,
+        per_page_module_graph,
         debug_ids,
         worker_asset_prefix,
         should_use_absolute_url_references,
@@ -604,6 +603,10 @@ pub async fn get_client_chunking_context(
     if let Some(g) = &*chunk_loading_global.await? {
         builder = builder.chunk_loading_global(g.clone());
     }
+
+    // Per-page graphs each see only one page, so none of them can decide what the shared runtime
+    // chunk may leave out.
+    builder = builder.shared_runtime_chunk(*per_page_module_graph.await?);
 
     if next_mode.is_development() {
         builder = builder

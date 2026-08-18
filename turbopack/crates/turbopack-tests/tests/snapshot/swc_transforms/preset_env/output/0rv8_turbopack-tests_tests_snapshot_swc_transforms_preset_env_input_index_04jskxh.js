@@ -3,7 +3,10 @@
     {"otherChunks":["output/turbopack_crates_turbopack-tests_tests_snapshot_1v9rcb0._.js"],"runtimeModuleIds":["[project]/turbopack/crates/turbopack-tests/tests/snapshot/swc_transforms/preset_env/input/index.js [test] (ecmascript)"]}
 ]);
 (function(){
-if (!Array.isArray(globalThis["TURBOPACK"])) {
+var chunksToRegister = globalThis["TURBOPACK"];
+if (chunksToRegister === undefined) {
+    chunksToRegister = [];
+} else if (!Array.isArray(chunksToRegister)) {
     return;
 }
 
@@ -31,11 +34,8 @@ function asyncGeneratorStep(gen, resolve, reject, _next, _throw, key, arg) {
         reject(error);
         return;
     }
-    if (info.done) {
-        resolve(value);
-    } else {
-        Promise.resolve(value).then(_next, _throw);
-    }
+    if (info.done) resolve(value);
+    else Promise.resolve(value).then(_next, _throw);
 }
 function _async_to_generator(fn) {
     return function() {
@@ -51,10 +51,6 @@ function _async_to_generator(fn) {
             _next(undefined);
         });
     };
-}
-function _type_of(obj) {
-    "@swc/helpers - typeof";
-    return obj && typeof Symbol !== "undefined" && obj.constructor === Symbol ? "symbol" : typeof obj;
 }
 function _ts_generator(thisArg, body) {
     var f, y, t, _ = {
@@ -154,6 +150,10 @@ function _ts_generator(thisArg, body) {
             done: true
         };
     }
+}
+function _type_of(obj) {
+    "@swc/helpers - typeof";
+    return obj && typeof Symbol !== "undefined" && obj.constructor === Symbol ? "symbol" : typeof obj;
 }
 /**
  * Describes why a module was instantiated.
@@ -799,11 +799,8 @@ function asyncGeneratorStep(gen, resolve, reject, _next, _throw, key, arg) {
         reject(error);
         return;
     }
-    if (info.done) {
-        resolve(value);
-    } else {
-        Promise.resolve(value).then(_next, _throw);
-    }
+    if (info.done) resolve(value);
+    else Promise.resolve(value).then(_next, _throw);
 }
 function _async_to_generator(fn) {
     return function() {
@@ -845,18 +842,10 @@ function _iterable_to_array_limit(arr, i) {
     return _arr;
 }
 function _non_iterable_rest() {
-    throw new TypeError("Invalid attempt to destructure non-iterable instance.\\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method.");
+    throw new TypeError("Invalid attempt to destructure non-iterable instance.\nIn order to be iterable, non-array objects must have a [Symbol.iterator]() method.");
 }
 function _sliced_to_array(arr, i) {
     return _array_with_holes(arr) || _iterable_to_array_limit(arr, i) || _unsupported_iterable_to_array(arr, i) || _non_iterable_rest();
-}
-function _unsupported_iterable_to_array(o, minLen) {
-    if (!o) return;
-    if (typeof o === "string") return _array_like_to_array(o, minLen);
-    var n = Object.prototype.toString.call(o).slice(8, -1);
-    if (n === "Object" && o.constructor) n = o.constructor.name;
-    if (n === "Map" || n === "Set") return Array.from(n);
-    if (n === "Arguments" || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(n)) return _array_like_to_array(o, minLen);
 }
 function _ts_generator(thisArg, body) {
     var f, y, t, _ = {
@@ -957,11 +946,39 @@ function _ts_generator(thisArg, body) {
         };
     }
 }
+function _unsupported_iterable_to_array(o, minLen) {
+    if (!o) return;
+    if (typeof o === "string") return _array_like_to_array(o, minLen);
+    var n = Object.prototype.toString.call(o).slice(8, -1);
+    if (n === "Object" && o.constructor) n = o.constructor.name;
+    if (n === "Map" || n === "Set") return Array.from(n);
+    if (n === "Arguments" || /^(?:Ui|I)nt(?:8|16|32)(?:Clamped)?Array$/.test(n)) return _array_like_to_array(o, minLen);
+}
 var browserContextPrototype = Context.prototype;
+var RUNTIME_CHUNK_BASE_PATH = typeof TURBOPACK_CHUNK_BASE_PATH === 'string' ? TURBOPACK_CHUNK_BASE_PATH : CHUNK_BASE_PATH;
 var moduleFactories = new Map();
 contextPrototype.M = moduleFactories;
 var availableModules = new Map();
 var availableModuleChunks = new Map();
+// Paths of every JS chunk whose module factories have been installed into this
+// runtime instance (page, worker, …), in registration order.
+//
+// Web workers get a fresh runtime realm, so module factories cannot be handed to
+// them directly (functions are not structured-cloneable). Instead `createWorker`
+// passes this list along with the worker's own chunks, and the worker re-imports
+// them — cheap, because the browser has them cached already. This is what lets
+// worker chunk groups use normal (nested) availability info instead of
+// `AvailabilityInfo::root()`, which is what breaks the self-referencing-worker
+// chunking cycle.
+var loadedJsChunkPaths = new Set();
+function registerLoadedJsChunk(chunk) {
+    loadedJsChunkPaths.add(getPathFromScript(chunk));
+}
+// Shared runtime primitive consumed by the bundled `createWorker` helper,
+// exposed as `__turbopack_get_loaded_chunk_paths__`.
+function getLoadedChunkPaths() {
+    return Array.from(loadedJsChunkPaths);
+}
 // Registry mapping a merged chunk's path to its constituent component chunk paths.
 var chunkComponents = new Map();
 // Registry mapping a component chunk's path to its size in bytes, used by the
@@ -1237,7 +1254,7 @@ function loadChunkByUrlInternal(sourceType, sourceData, chunkEntry) {
 // match the keys stored in `chunkComponents`.
 function chunkUrlToPath(chunkUrl) {
     var src = decodeURIComponent(chunkUrl.replace(/[?#].*$/, ''));
-    return src.startsWith(CHUNK_BASE_PATH) ? src.slice(CHUNK_BASE_PATH.length) : src;
+    return src.startsWith(RUNTIME_CHUNK_BASE_PATH) ? src.slice(RUNTIME_CHUNK_BASE_PATH.length) : src;
 }
 /**
  * When a merged chunk finishes registering (e.g. an initial-load `<script>`), mark its
@@ -1350,25 +1367,28 @@ browserContextPrototype.q = exportUrl;
 /**
  * Returns the URL relative to the origin where a chunk can be fetched from.
  */ function getChunkRelativeUrl(chunkPath) {
-    var basePath = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : CHUNK_BASE_PATH;
+    var basePath = arguments.length > 1 && arguments[1] !== void 0 ? arguments[1] : RUNTIME_CHUNK_BASE_PATH;
     // Most chunk paths need no escaping.
     var encodedPath = CHUNK_PATH_NEEDS_ENCODING.test(chunkPath) ? chunkPath.split('/').map(encodeURIComponent).join('/') : chunkPath;
     return `${basePath}${encodedPath}${ASSET_SUFFIX}`;
 }
 // Shared runtime primitives consumed by the bundled `createWorker` helper,
 // exposed as `__turbopack_chunk_base_path__` and `__turbopack_chunk_asset_suffix__`.
-browserContextPrototype.b = CHUNK_BASE_PATH;
+browserContextPrototype.b = RUNTIME_CHUNK_BASE_PATH;
 browserContextPrototype.X = ASSET_SUFFIX;
 // Shared runtime primitive: build a chunk's URL. Used by the bundled worker
 // helper and the WASM helper, exposed as `__turbopack_chunk_relative_url__`.
 browserContextPrototype.h = getChunkRelativeUrl;
+// Shared runtime primitive: the JS chunks already loaded in this runtime, used
+// by the bundled worker helper so a child worker can re-import them.
+browserContextPrototype.G = getLoadedChunkPaths;
 function getPathFromScript(chunkScript) {
     if (typeof chunkScript === 'string') {
         return chunkScript;
     }
     var chunkUrl = chunkScript.src;
     var src = decodeURIComponent(chunkUrl.replace(/[?#].*$/, ''));
-    var path = src.startsWith(CHUNK_BASE_PATH) ? src.slice(CHUNK_BASE_PATH.length) : src;
+    var path = src.startsWith(RUNTIME_CHUNK_BASE_PATH) ? src.slice(RUNTIME_CHUNK_BASE_PATH.length) : src;
     return path;
 }
 /**
@@ -1497,6 +1517,8 @@ function registerChunk(registration) {
     } else {
         runtimeParams = undefined;
         installCompressedModuleFactories(registration, /* offset= */ 1, moduleFactories);
+        // Only factory-bearing registrations are useful to pass on to a worker.
+        registerLoadedJsChunk(chunk);
     }
     return BACKEND.registerChunk(chunk, runtimeParams);
 }
@@ -1508,11 +1530,8 @@ function asyncGeneratorStep(gen, resolve, reject, _next, _throw, key, arg) {
         reject(error);
         return;
     }
-    if (info.done) {
-        resolve(value);
-    } else {
-        Promise.resolve(value).then(_next, _throw);
-    }
+    if (info.done) resolve(value);
+    else Promise.resolve(value).then(_next, _throw);
 }
 function _async_to_generator(fn) {
     return function() {
@@ -1533,9 +1552,7 @@ function _instanceof(left, right) {
     "@swc/helpers - instanceof";
     if (right != null && typeof Symbol !== "undefined" && right[Symbol.hasInstance]) {
         return !!right[Symbol.hasInstance](left);
-    } else {
-        return left instanceof right;
-    }
+    } else return left instanceof right;
 }
 function _ts_generator(thisArg, body) {
     var f, y, t, _ = {
@@ -1928,7 +1945,6 @@ var BACKEND;
         return resolver.promise;
     }
 })();
-var chunksToRegister = globalThis["TURBOPACK"];
 globalThis["TURBOPACK"] = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
 })();

@@ -17,6 +17,9 @@ declare var TURBOPACK_ASSET_SUFFIX: string
 // can't be detected via `document.currentScript`. Note it's stored in reversed
 // order to use `push` and `pop`
 declare var TURBOPACK_NEXT_CHUNK_URLS: ChunkUrl[] | undefined
+// Used in WebWorkers to override the regular chunk base path with the base
+// used for the worker entrypoint and its initial chunks.
+declare var TURBOPACK_CHUNK_BASE_PATH: string | undefined
 
 // Injected by rust code
 declare var CHUNK_BASE_PATH: string
@@ -33,6 +36,11 @@ interface TurbopackBrowserBaseContext<M> extends TurbopackBaseContext<M> {
 
 const browserContextPrototype =
   Context.prototype as TurbopackBrowserBaseContext<unknown>
+
+const RUNTIME_CHUNK_BASE_PATH =
+  typeof TURBOPACK_CHUNK_BASE_PATH === 'string'
+    ? TURBOPACK_CHUNK_BASE_PATH
+    : CHUNK_BASE_PATH
 
 // Provided by build or dev base
 declare function instantiateModule(
@@ -90,6 +98,28 @@ contextPrototype.M = moduleFactories
 const availableModules: Map<ModuleId, Promise<any> | true> = new Map()
 
 const availableModuleChunks: Map<ChunkPath, Promise<any> | true> = new Map()
+
+// Paths of every JS chunk whose module factories have been installed into this
+// runtime instance (page, worker, …), in registration order.
+//
+// Web workers get a fresh runtime realm, so module factories cannot be handed to
+// them directly (functions are not structured-cloneable). Instead `createWorker`
+// passes this list along with the worker's own chunks, and the worker re-imports
+// them — cheap, because the browser has them cached already. This is what lets
+// worker chunk groups use normal (nested) availability info instead of
+// `AvailabilityInfo::root()`, which is what breaks the self-referencing-worker
+// chunking cycle.
+const loadedJsChunkPaths: Set<ChunkPath> = new Set()
+
+function registerLoadedJsChunk(chunk: ChunkPath | ChunkScript): void {
+  loadedJsChunkPaths.add(getPathFromScript(chunk))
+}
+
+// Shared runtime primitive consumed by the bundled `createWorker` helper,
+// exposed as `__turbopack_get_loaded_chunk_paths__`.
+function getLoadedChunkPaths(): ChunkPath[] {
+  return Array.from(loadedJsChunkPaths)
+}
 
 // Registry mapping a merged chunk's path to its constituent component chunk paths.
 const chunkComponents: Map<ChunkPath, ChunkPath[]> = new Map()
@@ -341,7 +371,9 @@ function loadChunkByUrlInternal(
 function chunkUrlToPath(chunkUrl: ChunkUrl): ChunkPath {
   const src = decodeURIComponent(chunkUrl.replace(/[?#].*$/, ''))
   return (
-    src.startsWith(CHUNK_BASE_PATH) ? src.slice(CHUNK_BASE_PATH.length) : src
+    src.startsWith(RUNTIME_CHUNK_BASE_PATH)
+      ? src.slice(RUNTIME_CHUNK_BASE_PATH.length)
+      : src
   ) as ChunkPath
 }
 
@@ -486,7 +518,7 @@ const CHUNK_PATH_NEEDS_ENCODING = /[^A-Za-z0-9\-_.!~*'()/]/
  */
 function getChunkRelativeUrl(
   chunkPath: ChunkPath | ChunkListPath,
-  basePath: string = CHUNK_BASE_PATH
+  basePath: string = RUNTIME_CHUNK_BASE_PATH
 ): ChunkUrl {
   // Most chunk paths need no escaping.
   const encodedPath = CHUNK_PATH_NEEDS_ENCODING.test(chunkPath)
@@ -497,12 +529,16 @@ function getChunkRelativeUrl(
 
 // Shared runtime primitives consumed by the bundled `createWorker` helper,
 // exposed as `__turbopack_chunk_base_path__` and `__turbopack_chunk_asset_suffix__`.
-browserContextPrototype.b = CHUNK_BASE_PATH as ChunkBasePath
+browserContextPrototype.b = RUNTIME_CHUNK_BASE_PATH as ChunkBasePath
 browserContextPrototype.X = ASSET_SUFFIX as AssetSuffix
 
 // Shared runtime primitive: build a chunk's URL. Used by the bundled worker
 // helper and the WASM helper, exposed as `__turbopack_chunk_relative_url__`.
 browserContextPrototype.h = getChunkRelativeUrl
+
+// Shared runtime primitive: the JS chunks already loaded in this runtime, used
+// by the bundled worker helper so a child worker can re-import them.
+browserContextPrototype.G = getLoadedChunkPaths
 
 /**
  * Return the ChunkPath from a ChunkScript.
@@ -519,8 +555,8 @@ function getPathFromScript(
   }
   const chunkUrl = chunkScript.src!
   const src = decodeURIComponent(chunkUrl.replace(/[?#].*$/, ''))
-  const path = src.startsWith(CHUNK_BASE_PATH)
-    ? src.slice(CHUNK_BASE_PATH.length)
+  const path = src.startsWith(RUNTIME_CHUNK_BASE_PATH)
+    ? src.slice(RUNTIME_CHUNK_BASE_PATH.length)
     : src
   return path as ChunkPath | ChunkListPath
 }

@@ -1,10 +1,13 @@
-;!function(){try { var e="undefined"!=typeof globalThis?globalThis:"undefined"!=typeof global?global:"undefined"!=typeof window?window:"undefined"!=typeof self?self:{},n=(new e.Error).stack;n&&((e._debugIds|| (e._debugIds={}))[n]="8be33d93-70f0-5795-483a-8e4593e9e07e")}catch(e){}}();
+;!function(){try { var e="undefined"!=typeof globalThis?globalThis:"undefined"!=typeof global?global:"undefined"!=typeof window?window:"undefined"!=typeof self?self:{},n=(new e.Error).stack;n&&((e._debugIds|| (e._debugIds={}))[n]="fc1549a4-1663-9317-0f76-6ae097d9b43f")}catch(e){}}();
 (globalThis["TURBOPACK"] || (globalThis["TURBOPACK"] = [])).push([
     "output/1i9t_crates_turbopack-tests_tests_snapshot_debug-ids_browser_input_index_19boa0e.js",
     {"otherChunks":["output/1do3_crates_turbopack-tests_tests_snapshot_debug-ids_browser_input_index_03ibyvs.js"],"runtimeModuleIds":["[project]/turbopack/crates/turbopack-tests/tests/snapshot/debug-ids/browser/input/index.js [test] (ecmascript)"]}
 ]);
 (() => {
-if (!Array.isArray(globalThis["TURBOPACK"])) {
+var chunksToRegister = globalThis["TURBOPACK"];
+if (chunksToRegister === undefined) {
+    chunksToRegister = [];
+} else if (!Array.isArray(chunksToRegister)) {
     return;
 }
 
@@ -684,10 +687,30 @@ contextPrototype.a = asyncModule;
 /// <reference path="../../../shared/runtime/runtime-utils.ts" />
 // Used in WebWorkers to tell the runtime about the chunk suffix
 const browserContextPrototype = Context.prototype;
+const RUNTIME_CHUNK_BASE_PATH = typeof TURBOPACK_CHUNK_BASE_PATH === 'string' ? TURBOPACK_CHUNK_BASE_PATH : CHUNK_BASE_PATH;
 const moduleFactories = new Map();
 contextPrototype.M = moduleFactories;
 const availableModules = new Map();
 const availableModuleChunks = new Map();
+// Paths of every JS chunk whose module factories have been installed into this
+// runtime instance (page, worker, …), in registration order.
+//
+// Web workers get a fresh runtime realm, so module factories cannot be handed to
+// them directly (functions are not structured-cloneable). Instead `createWorker`
+// passes this list along with the worker's own chunks, and the worker re-imports
+// them — cheap, because the browser has them cached already. This is what lets
+// worker chunk groups use normal (nested) availability info instead of
+// `AvailabilityInfo::root()`, which is what breaks the self-referencing-worker
+// chunking cycle.
+const loadedJsChunkPaths = new Set();
+function registerLoadedJsChunk(chunk) {
+    loadedJsChunkPaths.add(getPathFromScript(chunk));
+}
+// Shared runtime primitive consumed by the bundled `createWorker` helper,
+// exposed as `__turbopack_get_loaded_chunk_paths__`.
+function getLoadedChunkPaths() {
+    return Array.from(loadedJsChunkPaths);
+}
 // Registry mapping a merged chunk's path to its constituent component chunk paths.
 const chunkComponents = new Map();
 // Registry mapping a component chunk's path to its size in bytes, used by the
@@ -863,7 +886,7 @@ function loadChunkByUrlInternal(sourceType, sourceData, chunkEntry) {
 // match the keys stored in `chunkComponents`.
 function chunkUrlToPath(chunkUrl) {
     const src = decodeURIComponent(chunkUrl.replace(/[?#].*$/, ''));
-    return src.startsWith(CHUNK_BASE_PATH) ? src.slice(CHUNK_BASE_PATH.length) : src;
+    return src.startsWith(RUNTIME_CHUNK_BASE_PATH) ? src.slice(RUNTIME_CHUNK_BASE_PATH.length) : src;
 }
 /**
  * When a merged chunk finishes registering (e.g. an initial-load `<script>`), mark its
@@ -955,25 +978,28 @@ browserContextPrototype.q = exportUrl;
  */ const CHUNK_PATH_NEEDS_ENCODING = /[^A-Za-z0-9\-_.!~*'()/]/;
 /**
  * Returns the URL relative to the origin where a chunk can be fetched from.
- */ function getChunkRelativeUrl(chunkPath, basePath = CHUNK_BASE_PATH) {
+ */ function getChunkRelativeUrl(chunkPath, basePath = RUNTIME_CHUNK_BASE_PATH) {
     // Most chunk paths need no escaping.
     const encodedPath = CHUNK_PATH_NEEDS_ENCODING.test(chunkPath) ? chunkPath.split('/').map(encodeURIComponent).join('/') : chunkPath;
     return `${basePath}${encodedPath}${ASSET_SUFFIX}`;
 }
 // Shared runtime primitives consumed by the bundled `createWorker` helper,
 // exposed as `__turbopack_chunk_base_path__` and `__turbopack_chunk_asset_suffix__`.
-browserContextPrototype.b = CHUNK_BASE_PATH;
+browserContextPrototype.b = RUNTIME_CHUNK_BASE_PATH;
 browserContextPrototype.X = ASSET_SUFFIX;
 // Shared runtime primitive: build a chunk's URL. Used by the bundled worker
 // helper and the WASM helper, exposed as `__turbopack_chunk_relative_url__`.
 browserContextPrototype.h = getChunkRelativeUrl;
+// Shared runtime primitive: the JS chunks already loaded in this runtime, used
+// by the bundled worker helper so a child worker can re-import them.
+browserContextPrototype.G = getLoadedChunkPaths;
 function getPathFromScript(chunkScript) {
     if (typeof chunkScript === 'string') {
         return chunkScript;
     }
     const chunkUrl = chunkScript.src;
     const src = decodeURIComponent(chunkUrl.replace(/[?#].*$/, ''));
-    const path = src.startsWith(CHUNK_BASE_PATH) ? src.slice(CHUNK_BASE_PATH.length) : src;
+    const path = src.startsWith(RUNTIME_CHUNK_BASE_PATH) ? src.slice(RUNTIME_CHUNK_BASE_PATH.length) : src;
     return path;
 }
 /**
@@ -2114,6 +2140,8 @@ function registerChunk(registration) {
         let chunkPath = getPathFromScript(chunk);
         runtimeParams = undefined;
         installCompressedModuleFactories(registration, /* offset= */ 1, moduleFactories, (id)=>addModuleToChunk(id, chunkPath));
+        // Only factory-bearing registrations are useful to pass on to a worker.
+        registerLoadedJsChunk(chunk);
     }
     return BACKEND.registerChunk(chunk, runtimeParams);
 }
@@ -2463,7 +2491,7 @@ let DEV_BACKEND;
     }
 })();
 function _eval({ code, url, map }) {
-    code += `\n\n//# sourceURL=${encodeURI(location.origin + CHUNK_BASE_PATH + url + ASSET_SUFFIX)}`;
+    code += `\n\n//# sourceURL=${encodeURI(location.origin + RUNTIME_CHUNK_BASE_PATH + url + ASSET_SUFFIX)}`;
     if (map) {
         code += `\n//# sourceMappingURL=data:application/json;charset=utf-8;base64,${btoa(// btoa doesn't handle nonlatin characters, so escape them as \x sequences
         // See https://stackoverflow.com/a/26603875
@@ -2472,7 +2500,6 @@ function _eval({ code, url, map }) {
     // eslint-disable-next-line no-eval
     return eval(code);
 }
-var chunksToRegister = globalThis["TURBOPACK"];
 globalThis["TURBOPACK"] = { push: registerChunk };
 chunksToRegister.forEach(registerChunk);
 var chunkListsToRegister = globalThis["TURBOPACK_CHUNK_LISTS"] || [];
@@ -2481,5 +2508,5 @@ chunkListsToRegister.forEach(registerChunkList);
 })();
 
 
-//# debugId=8be33d93-70f0-5795-483a-8e4593e9e07e
+//# debugId=fc1549a4-1663-9317-0f76-6ae097d9b43f
 //# sourceMappingURL=1do3_crates_turbopack-tests_tests_snapshot_debug-ids_browser_input_index_19boa0e.js.map
